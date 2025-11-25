@@ -24,7 +24,7 @@
       const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
       const array = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
       const kbuffer = new ArrayBuffer(kbytes * k);
-      const buckets = new Int32Array(n);
+      const buckets = new Uint32Array(n);
       if (a) {
         for (let i = 0; i < n; ++i) {
           buckets[i] = a[i];
@@ -140,7 +140,7 @@
   BloomFilter.union = function(a, b) {
     if (a.m === b.m && a.k === b.k) {
       const l = a.m >> 5;
-      const c = typedArrays ? new Int32Array(l) : new Array(l);
+      const c = typedArrays ? new Uint32Array(l) : new Array(l);
       for (let i = 0; i < l; ++i) {
         c[i] = a.buckets[i] | b.buckets[i];
       }
@@ -152,7 +152,7 @@
   BloomFilter.intersection = function(a, b) {
     if (a.m === b.m && a.k === b.k) {
       const l = a.m >> 5;
-      const c = typedArrays ? new Int32Array(l) : new Array(l);
+      const c = typedArrays ? new Uint32Array(l) : new Array(l);
       for (let i = 0; i < l; ++i) {
         c[i] = a.buckets[i] & b.buckets[i];
       }
