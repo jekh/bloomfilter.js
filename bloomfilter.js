@@ -1,14 +1,10 @@
-(function(exports) {
-  exports.BloomFilter = BloomFilter;
+export class BloomFilter {
 
-  const typedArrays = typeof ArrayBuffer !== "undefined";
-
-  // Creates a new bloom filter.  If *m* is an array-like object, with a length
-  // property, then the bloom filter is loaded with data from the array, where
-  // each element is a 32-bit integer.  Otherwise, *m* should specify the
-  // number of bits.  Note that *m* is rounded up to the nearest multiple of
-  // 32.  *k* specifies the number of hashing functions.
-  function BloomFilter(m, k) {
+  /**
+   * @param {number|ArrayLike} m - Number of bits, or an array of integers to load.
+   * @param {number} k - Number of hashing functions.
+   */
+  constructor(m, k) {
     let a;
     if (typeof m !== "number") {
       a = m;
@@ -20,36 +16,21 @@
     this.m = m;
     this.k = k;
 
-    if (typedArrays) {
-      const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
-      const array = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
-      const kbuffer = new ArrayBuffer(kbytes * k);
-      const buckets = new Uint32Array(n);
-      if (a) {
-        for (let i = 0; i < n; ++i) {
-          buckets[i] = a[i];
-        }
+    const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
+    const array = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
+    const kbuffer = new ArrayBuffer(kbytes * k);
+    const buckets = new Uint32Array(n);
+    if (a) {
+      for (let i = 0; i < n; ++i) {
+        buckets[i] = a[i];
       }
-      this.buckets = buckets;
-      this._locations = new array(kbuffer);
-    } else {
-      const buckets = [];
-      if (a) {
-        for (let i = 0; i < n; ++i) {
-          buckets[i] = a[i];
-        }
-      } else {
-        for (let i = 0; i < n; ++i) {
-          buckets[i] = 0;
-        }
-      }
-      this.buckets = buckets;
-      this._locations = [];
     }
+    this.buckets = buckets;
+    this._locations = new array(kbuffer);
   }
 
   // See http://willwhim.wpengine.com/2011/09/03/producing-n-hash-functions-by-hashing-only-once/
-  BloomFilter.prototype.locations = function(v) {
+  locations(v) {
     const k = this.k;
     const m = this.m;
     const r = this._locations;
@@ -95,18 +76,18 @@
       r[i] = a;
     }
     return r;
-  };
+  }
 
-  BloomFilter.prototype.add = function(v) {
+  add(v) {
     const l = this.locations(v + "");
     const k = this.k;
     const buckets = this.buckets;
     for (let i = 0; i < k; ++i) {
       buckets[l[i] >> 5] |= 1 << (l[i] & 0x1f);
     }
-  };
+  }
 
-  BloomFilter.prototype.test = function(v) {
+  test(v) {
     const l = this.locations(v + "");
     const k = this.k;
     const buckets = this.buckets;
@@ -117,30 +98,32 @@
       }
     }
     return true;
-  };
+  }
 
   // Estimated cardinality.
-  BloomFilter.prototype.size = function() {
+  size() {
     return -this.m * Math.log(1 - this.countBits() / this.m) / this.k;
-  };
+  }
 
-  BloomFilter.prototype.countBits = function() {
+  countBits() {
     const buckets = this.buckets;
     let bits = 0;
     for (let i = 0; i < buckets.length; ++i) {
       bits += popcnt(buckets[i]);
     }
     return bits;
-  };
+  }
 
-  BloomFilter.prototype.error = function() {
+  error() {
     return Math.pow(this.countBits() / this.m, this.k);
-  };
+  }
 
-  BloomFilter.union = function(a, b) {
+  // Static methods.
+
+  static union(a, b) {
     if (a.m === b.m && a.k === b.k) {
       const l = a.m >> 5;
-      const c = typedArrays ? new Uint32Array(l) : new Array(l);
+      const c = new Uint32Array(l);
       for (let i = 0; i < l; ++i) {
         c[i] = a.buckets[i] | b.buckets[i];
       }
@@ -149,10 +132,10 @@
     throw new Error("Bloom filters must have identical {m, k}.");
   }
 
-  BloomFilter.intersection = function(a, b) {
+  static intersection(a, b) {
     if (a.m === b.m && a.k === b.k) {
       const l = a.m >> 5;
-      const c = typedArrays ? new Uint32Array(l) : new Array(l);
+      const c = new Uint32Array(l);
       for (let i = 0; i < l; ++i) {
         c[i] = a.buckets[i] & b.buckets[i];
       }
@@ -161,16 +144,16 @@
     throw new Error("Bloom filters must have identical {m, k}.");
   }
 
-  BloomFilter.withTargetError = function(n, error) {
+  static withTargetError (n, error) {
     const m = Math.ceil(-n * Math.log2(error) / Math.LN2);
     const k = Math.ceil(Math.LN2 * m / n);
     return new BloomFilter(m, k);
-  };
-
-  // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
-  function popcnt(v) {
-    v -= (v >>> 1) & 0x55555555;
-    v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
-    return ((v + (v >>> 4) & 0xf0f0f0f) * 0x1010101) >>> 24;
   }
-})(typeof exports !== "undefined" ? exports : this);
+};
+
+// http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
+function popcnt(v) {
+  v -= (v >>> 1) & 0x55555555;
+  v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
+  return ((v + (v >>> 4) & 0xf0f0f0f) * 0x1010101) >>> 24;
+}
