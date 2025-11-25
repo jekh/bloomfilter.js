@@ -169,8 +169,8 @@
 
   // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
   function popcnt(v) {
-    v -= (v >> 1) & 0x55555555;
-    v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
-    return ((v + (v >> 4) & 0xf0f0f0f) * 0x1010101) >> 24;
+    v -= (v >>> 1) & 0x55555555;
+    v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
+    return ((v + (v >>> 4) & 0xf0f0f0f) * 0x1010101) >>> 24;
   }
 })(typeof exports !== "undefined" ? exports : this);
