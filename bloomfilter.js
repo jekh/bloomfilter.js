@@ -17,7 +17,7 @@ export class BloomFilter {
     this.k = k;
 
     const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
-    const array = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
+    const ArrayType = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
     const kbuffer = new ArrayBuffer(kbytes * k);
     const buckets = new Uint32Array(n);
     if (a) {
@@ -26,7 +26,7 @@ export class BloomFilter {
       }
     }
     this.buckets = buckets;
-    this._locations = new array(kbuffer);
+    this._locations = new ArrayType(kbuffer);
   }
 
   // See http://willwhim.wpengine.com/2011/09/03/producing-n-hash-functions-by-hashing-only-once/
