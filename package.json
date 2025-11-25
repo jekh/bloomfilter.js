@@ -17,6 +17,7 @@
     "type": "git",
     "url": "git+https://github.com/jasondavies/bloomfilter.js.git"
   },
+  "main": "bloomfilter.js",
   "exports": "./bloomfilter.js",
   "files": ["bloomfilter.js"],
   "scripts": {
