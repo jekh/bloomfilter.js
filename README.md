@@ -26,15 +26,11 @@ bloom.test("foo");
 bloom.test("bar");
 bloom.test("blah");
 
-// Serialisation. Note that bloom.buckets may be a typed array,
-// so we convert to a normal array first.
-const array = Array.from(bloom.buckets);
-const json = JSON.stringify(array);
+// Serialisation.
+const json = JSON.stringify(bloom);
 
-// Deserialisation. Any non-empty array-like object of unsigned 32-bit bucket
-// values is supported. The contents are copied into the filter's internal
-// Uint32Array.
-const loadedBloom = new BloomFilter(array, 16);
+// Deserialisation.
+const loadedBloom = BloomFilter.fromJSON(json);
 
 // Automatically pick {m, k} based on number of elements and target false
 // positive error rate.

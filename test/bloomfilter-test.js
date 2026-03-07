@@ -48,6 +48,29 @@ describe('bloom filter', () => {
     assert.equal(f.test(2), false);
   });
 
+  it('serialises and deserialises with JSON', () => {
+    const f = new BloomFilter(1000, 4);
+    f.add("Bess");
+    f.add("Jane");
+
+    const json = JSON.stringify(f);
+    const restored = BloomFilter.fromJSON(json);
+
+    assert.notEqual(restored, f);
+    assert.deepEqual(restored.toJSON(), JSON.parse(json));
+    assert.equal(restored.test("Bess"), true);
+    assert.equal(restored.test("Jane"), true);
+    assert.equal(restored.test("Emily"), false);
+  });
+
+  it('rejects invalid serialised filters', () => {
+    assert.throws(() => BloomFilter.fromJSON(null), /must be an object or JSON string/);
+    assert.throws(() => BloomFilter.fromJSON({ version: 1, buckets: [1] }), /must include k/);
+    assert.throws(() => BloomFilter.fromJSON({ version: 1, k: 1 }), /must include buckets/);
+    assert.throws(() => BloomFilter.fromJSON({ version: 2, k: 1, buckets: [1] }), /Unsupported BloomFilter serialisation format version/);
+    assert.throws(() => BloomFilter.fromJSON({ version: 1, m: 64, k: 1, buckets: [1] }), /inconsistent m and buckets/);
+  });
+
   it('rejects invalid constructor inputs', () => {
     assert.throws(() => new BloomFilter(0, 1), /m must be a positive finite number of bits/);
     assert.throws(() => new BloomFilter(1000, 0), /k must be a positive integer/);

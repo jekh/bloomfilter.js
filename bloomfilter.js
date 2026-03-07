@@ -1,5 +1,6 @@
 const MAX_BITS = 0x100000000;
 const MAX_BUCKETS = MAX_BITS / 32;
+const SERIALISATION_VERSION = 1;
 
 export class BloomFilter {
 
@@ -127,7 +128,32 @@ export class BloomFilter {
     return Math.pow(this.countBits() / this.m, this.k);
   }
 
+  toJSON() {
+    return {
+      version: SERIALISATION_VERSION,
+      m: this.m,
+      k: this.k,
+      buckets: Array.from(this.buckets)
+    };
+  }
+
   // Static methods.
+
+  static fromJSON(value) {
+    const data = typeof value === "string" ? JSON.parse(value) : value;
+    assertSerialisedFilter(data);
+
+    if (data.version !== undefined && data.version !== SERIALISATION_VERSION) {
+      throw new RangeError(`Unsupported BloomFilter serialisation format version: ${data.version}.`);
+    }
+
+    const expectedM = data.buckets.length * 32;
+    if (data.m !== undefined && data.m !== expectedM) {
+      throw new RangeError("Serialised BloomFilter has inconsistent m and buckets.");
+    }
+
+    return new BloomFilter(data.buckets, data.k);
+  }
 
   static union(a, b) {
     if (a.m === b.m && a.k === b.k && a.buckets.length === b.buckets.length) {
@@ -202,5 +228,17 @@ function assertExpectedSize(n) {
 function assertTargetError(error) {
   if (typeof error !== "number" || !Number.isFinite(error) || error <= 0 || error >= 1) {
     throw new RangeError("error must be a finite number between 0 and 1, exclusive.");
+  }
+}
+
+function assertSerialisedFilter(data) {
+  if (data == null || typeof data !== "object") {
+    throw new RangeError("Serialised BloomFilter must be an object or JSON string.");
+  }
+  if (!("k" in data)) {
+    throw new RangeError("Serialised BloomFilter must include k.");
+  }
+  if (!("buckets" in data)) {
+    throw new RangeError("Serialised BloomFilter must include buckets.");
   }
 }
