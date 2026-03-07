@@ -31,9 +31,9 @@ bloom.test("blah");
 const array = Array.from(bloom.buckets);
 const json = JSON.stringify(array);
 
-// Deserialisation. Note that the any array-like object is supported, but
-// this will be used directly, so you may wish to use a typed array for
-// performance.
+// Deserialisation. Any non-empty array-like object of unsigned 32-bit bucket
+// values is supported. The contents are copied into the filter's internal
+// Uint32Array.
 const loadedBloom = new BloomFilter(array, 16);
 
 // Automatically pick {m, k} based on number of elements and target false
