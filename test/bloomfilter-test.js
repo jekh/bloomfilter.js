@@ -48,6 +48,49 @@ describe('bloom filter', () => {
     assert.equal(f.test(2), false);
   });
 
+  it('rejects invalid constructor inputs', () => {
+    assert.throws(() => new BloomFilter(0, 1), /m must be a positive finite number of bits/);
+    assert.throws(() => new BloomFilter(1000, 0), /k must be a positive integer/);
+    assert.throws(() => new BloomFilter([], 1), /non-empty array-like/);
+    assert.throws(() => new BloomFilter([1, -1], 1), /Bucket values must be unsigned 32-bit integers/);
+  });
+
+  it('rejects invalid target error inputs', () => {
+    assert.throws(() => BloomFilter.withTargetError(0, 1e-5), /n must be a positive finite number/);
+    assert.throws(() => BloomFilter.withTargetError(100, 1), /error must be a finite number between 0 and 1, exclusive/);
+  });
+
+  it('uses unsigned bucket indexes for high-bit locations', () => {
+    const location = 0x80000020;
+    const bucket = location >>> 5;
+    const fake = {
+      k: 1,
+      buckets: Object.create(null),
+      locations() {
+        return Uint32Array.of(location);
+      }
+    };
+
+    BloomFilter.prototype.add.call(fake, "x");
+    assert.equal(fake.buckets[bucket], 1);
+    assert.equal(fake.buckets[location >> 5], undefined);
+    assert.equal(BloomFilter.prototype.test.call(fake, "x"), true);
+  });
+
+  it('combines filters without signed bucket-length overflow', () => {
+    // Force the sign bit in m without allocating a giant backing array.
+    const f0 = new BloomFilter([0b01], 1);
+    const f1 = new BloomFilter([0b10], 1);
+    f0.m = 0x80000000;
+    f1.m = 0x80000000;
+
+    const union = BloomFilter.union(f0, f1);
+    const intersection = BloomFilter.intersection(f0, f1);
+
+    assert.equal(union.buckets[0], 0b11);
+    assert.equal(intersection.buckets[0], 0b00);
+  });
+
   it('size', () => {
     const f = new BloomFilter(1024 * 1024, 4);
     for (let i = 0; i < 100; ++i) f.add(i);

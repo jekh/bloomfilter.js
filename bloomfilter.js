@@ -1,3 +1,6 @@
+const MAX_BITS = 0x100000000;
+const MAX_BUCKETS = MAX_BITS / 32;
+
 export class BloomFilter {
 
   /**
@@ -7,9 +10,13 @@ export class BloomFilter {
   constructor(m, k) {
     let a;
     if (typeof m !== "number") {
+      assertBucketArrayLike(m);
       a = m;
       m = a.length * 32;
+    } else {
+      assertBitSize(m);
     }
+    assertHashCount(k);
 
     const n = Math.ceil(m / 32);
     m = n * 32;
@@ -22,7 +29,9 @@ export class BloomFilter {
     const buckets = new Uint32Array(n);
     if (a) {
       for (let i = 0; i < n; ++i) {
-        buckets[i] = a[i];
+        const value = a[i];
+        assertBucketValue(value);
+        buckets[i] = value;
       }
     }
     this.buckets = buckets;
@@ -83,7 +92,7 @@ export class BloomFilter {
     const k = this.k;
     const buckets = this.buckets;
     for (let i = 0; i < k; ++i) {
-      buckets[l[i] >> 5] |= 1 << (l[i] & 0x1f);
+      buckets[l[i] >>> 5] |= 1 << (l[i] & 0x1f);
     }
   }
 
@@ -93,7 +102,7 @@ export class BloomFilter {
     const buckets = this.buckets;
     for (let i = 0; i < k; ++i) {
       const b = l[i];
-      if ((buckets[b >> 5] & (1 << (b & 0x1f))) === 0) {
+      if ((buckets[b >>> 5] & (1 << (b & 0x1f))) === 0) {
         return false;
       }
     }
@@ -121,8 +130,8 @@ export class BloomFilter {
   // Static methods.
 
   static union(a, b) {
-    if (a.m === b.m && a.k === b.k) {
-      const l = a.m >> 5;
+    if (a.m === b.m && a.k === b.k && a.buckets.length === b.buckets.length) {
+      const l = a.buckets.length;
       const c = new Uint32Array(l);
       for (let i = 0; i < l; ++i) {
         c[i] = a.buckets[i] | b.buckets[i];
@@ -133,8 +142,8 @@ export class BloomFilter {
   }
 
   static intersection(a, b) {
-    if (a.m === b.m && a.k === b.k) {
-      const l = a.m >> 5;
+    if (a.m === b.m && a.k === b.k && a.buckets.length === b.buckets.length) {
+      const l = a.buckets.length;
       const c = new Uint32Array(l);
       for (let i = 0; i < l; ++i) {
         c[i] = a.buckets[i] & b.buckets[i];
@@ -145,6 +154,8 @@ export class BloomFilter {
   }
 
   static withTargetError (n, error) {
+    assertExpectedSize(n);
+    assertTargetError(error);
     const m = Math.ceil(-n * Math.log2(error) / Math.LN2);
     const k = Math.ceil(Math.LN2 * m / n);
     return new BloomFilter(m, k);
@@ -156,4 +167,40 @@ function popcnt(v) {
   v -= (v >>> 1) & 0x55555555;
   v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
   return ((v + (v >>> 4) & 0xf0f0f0f) * 0x1010101) >>> 24;
+}
+
+function assertBitSize(m) {
+  if (typeof m !== "number" || !Number.isFinite(m) || m <= 0 || m > MAX_BITS) {
+    throw new RangeError(`m must be a positive finite number of bits no greater than ${MAX_BITS}.`);
+  }
+}
+
+function assertBucketArrayLike(a) {
+  if (a == null || !Number.isInteger(a.length) || a.length <= 0 || a.length > MAX_BUCKETS) {
+    throw new RangeError(`m must be a positive number of bits or a non-empty array-like of up to ${MAX_BUCKETS} 32-bit buckets.`);
+  }
+}
+
+function assertBucketValue(value) {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+    throw new RangeError("Bucket values must be unsigned 32-bit integers.");
+  }
+}
+
+function assertHashCount(k) {
+  if (!Number.isInteger(k) || k <= 0) {
+    throw new RangeError("k must be a positive integer.");
+  }
+}
+
+function assertExpectedSize(n) {
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) {
+    throw new RangeError("n must be a positive finite number.");
+  }
+}
+
+function assertTargetError(error) {
+  if (typeof error !== "number" || !Number.isFinite(error) || error <= 0 || error >= 1) {
+    throw new RangeError("error must be a finite number between 0 and 1, exclusive.");
+  }
 }
