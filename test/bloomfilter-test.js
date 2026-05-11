@@ -137,6 +137,63 @@ describe('bloom filter', () => {
     assert.ok(Math.abs(f.error() - 1e-5) <= 1e-5, 'Error within delta');
   });
 
+  it('withTargetError defaults storage to tight', () => {
+    const f = BloomFilter.withTargetError(100, 1e-5);
+    assert.equal(f.m, 2400);
+    assert.equal(f._useMask, false);
+  });
+
+  it('withTargetError with storage:tight matches default', () => {
+    const a = BloomFilter.withTargetError(100, 1e-5);
+    const b = BloomFilter.withTargetError(100, 1e-5, { storage: "tight" });
+    assert.equal(a.m, b.m);
+    assert.equal(a.k, b.k);
+    assert.equal(a._useMask, b._useMask);
+  });
+
+  it('withTargetError with storage:pow2 rounds m up to a power of 2', () => {
+    const f = BloomFilter.withTargetError(100, 1e-5, { storage: "pow2" });
+    assert.equal(f.m, 4096);
+    assert.equal(f._useMask, true);
+    f.add("hello");
+    assert.equal(f.test("hello"), true);
+    assert.equal(f.test("nope"), false);
+  });
+
+  it('storage:pow2 and storage:tight produce different bit layouts but compatible behavior', () => {
+    const tight = BloomFilter.withTargetError(60_000, 1e-3);
+    const pow2 = BloomFilter.withTargetError(60_000, 1e-3, { storage: "pow2" });
+    assert.equal(tight.k, pow2.k);
+    assert.notEqual(tight.m, pow2.m);
+    assert.equal(tight._useMask, false);
+    assert.equal(pow2._useMask, true);
+    tight.add("x");
+    pow2.add("x");
+    assert.equal(tight.test("x"), true);
+    assert.equal(pow2.test("x"), true);
+  });
+
+  it('rejects invalid storage option', () => {
+    assert.throws(
+      () => new BloomFilter(1024, 4, { storage: "bogus" }),
+      /storage must be "tight" or "pow2"/
+    );
+  });
+
+  it('serialised pow2 filters auto-detect bitmask path on deserialise', () => {
+    const f = BloomFilter.withTargetError(60_000, 1e-3, { storage: "pow2" });
+    f.add("a");
+    f.add("b");
+    f.add("c");
+
+    const restored = BloomFilter.fromJSON(JSON.stringify(f));
+    assert.equal(restored.m, f.m);
+    assert.equal(restored._useMask, true);
+    assert.equal(restored.test("a"), true);
+    assert.equal(restored.test("b"), true);
+    assert.equal(restored.test("c"), true);
+  });
+
   it('union', () => {
     const f0 = BloomFilter.withTargetError(100, 1e-5);
     const f1 = BloomFilter.withTargetError(100, 1e-5);
@@ -163,6 +220,20 @@ describe('bloom filter', () => {
     assert.equal(intersection.buckets[0], 0b00);
     assert.ok(union.buckets instanceof Uint32Array);
     assert.ok(intersection.buckets instanceof Uint32Array);
+  });
+
+  it('union/intersection propagate _useMask via trusted-buckets factory', () => {
+    const tightA = BloomFilter.withTargetError(60_000, 1e-3);
+    const tightB = BloomFilter.withTargetError(60_000, 1e-3);
+    assert.equal(tightA._useMask, false);
+    assert.equal(BloomFilter.union(tightA, tightB)._useMask, false);
+    assert.equal(BloomFilter.intersection(tightA, tightB)._useMask, false);
+
+    const pow2A = BloomFilter.withTargetError(60_000, 1e-3, { storage: "pow2" });
+    const pow2B = BloomFilter.withTargetError(60_000, 1e-3, { storage: "pow2" });
+    assert.equal(pow2A._useMask, true);
+    assert.equal(BloomFilter.union(pow2A, pow2B)._useMask, true);
+    assert.equal(BloomFilter.intersection(pow2A, pow2B)._useMask, true);
   });
 
   it('intersection', () => {

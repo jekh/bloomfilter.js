@@ -4,15 +4,24 @@ const SERIALISATION_VERSION = 1;
 
 // Hash and location generation are inlined into add() and test() to avoid a
 // scratch-buffer round-trip per bit and to let test() return on the first
-// missing bit. The public locations() method is retained for compatibility.
+// missing bit.
+//
+// The hot path uses a bitmask when m is a power of 2, and otherwise uses the
+// existing signed modulo reduction. The public locations() method is retained
+// for compatibility.
 
 export class BloomFilter {
 
   /**
    * @param {number|ArrayLike} m - Number of bits, or an array of integers to load.
    * @param {number} k - Number of hashing functions.
+   * @param {object} [options]
+   * @param {"tight"|"pow2"} [options.storage="tight"] - Storage rounding policy
+   *     when m is a number. "tight" rounds to the next 32-bit word; "pow2"
+   *     rounds to a power of 2 for bitmask reduction, at up to ~2x storage.
+   *     Ignored when m is an array of buckets.
    */
-  constructor(m, k) {
+  constructor(m, k, options = {}) {
     let a;
     if (typeof m !== "number") {
       assertBucketArrayLike(m);
@@ -23,10 +32,25 @@ export class BloomFilter {
     }
     assertHashCount(k);
 
-    const n = Math.ceil(m / 32);
-    m = n * 32;
+    const storage = options.storage ?? "tight";
+    if (storage !== "tight" && storage !== "pow2") {
+      throw new RangeError('options.storage must be "tight" or "pow2".');
+    }
+
+    if (a === undefined && storage === "pow2") {
+      m = nextPowerOf2(Math.max(32, m));
+      if (m > MAX_BITS) {
+        throw new RangeError(`Rounded m exceeds maximum bits ${MAX_BITS}.`);
+      }
+    } else {
+      const n = Math.ceil(m / 32);
+      m = n * 32;
+    }
+
+    const n = m / 32;
     this.m = m;
     this.k = k;
+    this._useMask = isPowerOf2(m);
 
     const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
     const ArrayType = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
@@ -76,20 +100,27 @@ export class BloomFilter {
       b = (v1 << 16) | v0;
     }
 
-    a = (a % m);
-    if (a < 0) a += m;
-    b = (b % m);
-    if (b < 0) b += m;
-
-    // Use enhanced double hashing, i.e. r[i] = h1(v) + i*h2(v) + (i*i*i - i)/6
-    // Reference:
-    //   Dillinger, Peter C., and Panagiotis Manolios. "Bloom filters in probabilistic verification."
-    //   https://www.khoury.northeastern.edu/~pete/pub/bloom-filters-verification.pdf
-    r[0] = a;
-    for (let i = 1; i < k; ++i) {
-      a = (a + b) % m;
-      b = (b + i) % m;
-      r[i] = a;
+    if (this._useMask) {
+      const mask = m - 1;
+      a &= mask;
+      b &= mask;
+      r[0] = a;
+      for (let i = 1; i < k; ++i) {
+        a = (a + b) & mask;
+        b = (b + i) & mask;
+        r[i] = a;
+      }
+    } else {
+      a = (a % m);
+      if (a < 0) a += m;
+      b = (b % m);
+      if (b < 0) b += m;
+      r[0] = a;
+      for (let i = 1; i < k; ++i) {
+        a = (a + b) % m;
+        b = (b + i) % m;
+        r[i] = a;
+      }
     }
     return r;
   }
@@ -125,16 +156,28 @@ export class BloomFilter {
       b = (v1 << 16) | v0;
     }
 
-    a = (a % m);
-    if (a < 0) a += m;
-    b = (b % m);
-    if (b < 0) b += m;
-
-    buckets[a >>> 5] |= 1 << (a & 0x1f);
-    for (let i = 1; i < k; ++i) {
-      a = (a + b) % m;
-      b = (b + i) % m;
+    if (this._useMask) {
+      const mask = m - 1;
+      a &= mask;
+      b &= mask;
       buckets[a >>> 5] |= 1 << (a & 0x1f);
+      for (let i = 1; i < k; ++i) {
+        a = (a + b) & mask;
+        b = (b + i) & mask;
+        buckets[a >>> 5] |= 1 << (a & 0x1f);
+      }
+    } else {
+      a = (a % m);
+      if (a < 0) a += m;
+      b = (b % m);
+      if (b < 0) b += m;
+
+      buckets[a >>> 5] |= 1 << (a & 0x1f);
+      for (let i = 1; i < k; ++i) {
+        a = (a + b) % m;
+        b = (b + i) % m;
+        buckets[a >>> 5] |= 1 << (a & 0x1f);
+      }
     }
   }
 
@@ -169,16 +212,28 @@ export class BloomFilter {
       b = (v1 << 16) | v0;
     }
 
-    a = (a % m);
-    if (a < 0) a += m;
-    b = (b % m);
-    if (b < 0) b += m;
-
-    if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
-    for (let i = 1; i < k; ++i) {
-      a = (a + b) % m;
-      b = (b + i) % m;
+    if (this._useMask) {
+      const mask = m - 1;
+      a &= mask;
+      b &= mask;
       if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
+      for (let i = 1; i < k; ++i) {
+        a = (a + b) & mask;
+        b = (b + i) & mask;
+        if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
+      }
+    } else {
+      a = (a % m);
+      if (a < 0) a += m;
+      b = (b % m);
+      if (b < 0) b += m;
+
+      if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
+      for (let i = 1; i < k; ++i) {
+        a = (a + b) % m;
+        b = (b + i) % m;
+        if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
+      }
     }
     return true;
   }
@@ -237,6 +292,7 @@ export class BloomFilter {
     filter.m = m;
     filter.k = k;
     filter.buckets = buckets;
+    filter._useMask = isPowerOf2(m);
 
     const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
     const ArrayType = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
@@ -270,12 +326,17 @@ export class BloomFilter {
     throw new Error("Bloom filters must have identical {m, k}.");
   }
 
-  static withTargetError (n, error) {
+  /**
+   * @param {number} n - Expected number of items to be added.
+   * @param {number} error - Target false-positive rate (0 < error < 1).
+   * @param {object} [options] - Forwarded to the constructor.
+   */
+  static withTargetError (n, error, options) {
     assertExpectedSize(n);
     assertTargetError(error);
     const m = Math.ceil(-n * Math.log2(error) / Math.LN2);
     const k = Math.ceil(Math.LN2 * m / n);
-    return new BloomFilter(m, k);
+    return new BloomFilter(m, k, options);
   }
 };
 
@@ -284,6 +345,16 @@ function popcnt(v) {
   v -= (v >>> 1) & 0x55555555;
   v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
   return ((v + (v >>> 4) & 0xf0f0f0f) * 0x1010101) >>> 24;
+}
+
+function nextPowerOf2(n) {
+  if (n <= 1) return 1;
+  return 2 ** Math.ceil(Math.log2(n));
+}
+
+function isPowerOf2(n) {
+  // Bit trick is valid for our m range [1, 2^32]; MAX_BITS enforces the upper bound.
+  return n > 0 && (n & (n - 1)) === 0;
 }
 
 function assertBitSize(m) {
