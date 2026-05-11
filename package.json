@@ -32,8 +32,7 @@
 	},
 	"files": [
 		"bloomfilter.js",
-		"bloomfilter.d.ts",
-		"bloomfilter.ts"
+		"bloomfilter.d.ts"
 	],
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
@@ -46,10 +45,10 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.15",
-		"@types/node": "^24.0.0",
+		"@types/node": "^22.0.0",
 		"typescript": "^6.0.3"
 	},
 	"engines": {
-		"node": ">=18.0.0"
+		"node": ">=22.0.0"
 	}
 }
