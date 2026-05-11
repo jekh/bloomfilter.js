@@ -2,6 +2,10 @@ const MAX_BITS = 0x100000000;
 const MAX_BUCKETS = MAX_BITS / 32;
 const SERIALISATION_VERSION = 1;
 
+// Hash and location generation are inlined into add() and test() to avoid a
+// scratch-buffer round-trip per bit and to let test() return on the first
+// missing bit. The public locations() method is retained for compatibility.
+
 export class BloomFilter {
 
   /**
@@ -39,6 +43,8 @@ export class BloomFilter {
     this._locations = new ArrayType(kbuffer);
   }
 
+  // Retained for compatibility; add() and test() inline this loop to avoid
+  // scratch-buffer writes and to allow early exits.
   // See http://willwhim.wpengine.com/2011/09/03/producing-n-hash-functions-by-hashing-only-once/
   locations(v) {
     const k = this.k;
@@ -89,23 +95,90 @@ export class BloomFilter {
   }
 
   add(v) {
-    const l = this.locations(v + "");
     const k = this.k;
+    const m = this.m;
     const buckets = this.buckets;
-    for (let i = 0; i < k; ++i) {
-      buckets[l[i] >>> 5] |= 1 << (l[i] & 0x1f);
+    const s = v + "";
+    let a;
+    let b;
+
+    // FNV-1a hash (64-bit).
+    {
+      const fnv64PrimeX = 0x01b3;
+      const l = s.length;
+      let t0 = 0, t1 = 0, t2 = 0, t3 = 0;
+      let v0 = 0x2325, v1 = 0x8422, v2 = 0x9ce4, v3 = 0xcbf2;
+
+      for (let i = 0; i < l; ++i) {
+        v0 ^= s.charCodeAt(i);
+        t0 = v0 * fnv64PrimeX; t1 = v1 * fnv64PrimeX; t2 = v2 * fnv64PrimeX; t3 = v3 * fnv64PrimeX;
+        t2 += v0 << 8; t3 += v1 << 8;
+        t1 += t0 >>> 16;
+        v0 = t0 & 0xffff;
+        t2 += t1 >>> 16;
+        v1 = t1 & 0xffff;
+        v3 = (t3 + (t2 >>> 16)) & 0xffff;
+        v2 = t2 & 0xffff;
+      }
+
+      a = (v3 << 16) | v2;
+      b = (v1 << 16) | v0;
+    }
+
+    a = (a % m);
+    if (a < 0) a += m;
+    b = (b % m);
+    if (b < 0) b += m;
+
+    buckets[a >>> 5] |= 1 << (a & 0x1f);
+    for (let i = 1; i < k; ++i) {
+      a = (a + b) % m;
+      b = (b + i) % m;
+      buckets[a >>> 5] |= 1 << (a & 0x1f);
     }
   }
 
   test(v) {
-    const l = this.locations(v + "");
     const k = this.k;
+    const m = this.m;
     const buckets = this.buckets;
-    for (let i = 0; i < k; ++i) {
-      const b = l[i];
-      if ((buckets[b >>> 5] & (1 << (b & 0x1f))) === 0) {
-        return false;
+    const s = v + "";
+    let a;
+    let b;
+
+    // FNV-1a hash (64-bit).
+    {
+      const fnv64PrimeX = 0x01b3;
+      const l = s.length;
+      let t0 = 0, t1 = 0, t2 = 0, t3 = 0;
+      let v0 = 0x2325, v1 = 0x8422, v2 = 0x9ce4, v3 = 0xcbf2;
+
+      for (let i = 0; i < l; ++i) {
+        v0 ^= s.charCodeAt(i);
+        t0 = v0 * fnv64PrimeX; t1 = v1 * fnv64PrimeX; t2 = v2 * fnv64PrimeX; t3 = v3 * fnv64PrimeX;
+        t2 += v0 << 8; t3 += v1 << 8;
+        t1 += t0 >>> 16;
+        v0 = t0 & 0xffff;
+        t2 += t1 >>> 16;
+        v1 = t1 & 0xffff;
+        v3 = (t3 + (t2 >>> 16)) & 0xffff;
+        v2 = t2 & 0xffff;
       }
+
+      a = (v3 << 16) | v2;
+      b = (v1 << 16) | v0;
+    }
+
+    a = (a % m);
+    if (a < 0) a += m;
+    b = (b % m);
+    if (b < 0) b += m;
+
+    if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
+    for (let i = 1; i < k; ++i) {
+      a = (a + b) % m;
+      b = (b + i) % m;
+      if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
     }
     return true;
   }

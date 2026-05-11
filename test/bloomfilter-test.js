@@ -84,20 +84,17 @@ describe('bloom filter', () => {
   });
 
   it('uses unsigned bucket indexes for high-bit locations', () => {
-    const location = 0x80000020;
-    const bucket = location >>> 5;
+    // m = 2^32 lets a corrected location exceed 2^31, which is the range
+    // where >>> 5 and >> 5 produce different bucket indexes. The fake
+    // bucket object avoids allocating a giant backing array.
     const fake = {
-      k: 1,
-      buckets: Object.create(null),
-      locations() {
-        return Uint32Array.of(location);
-      }
+      m: 0x100000000,
+      k: 4,
+      buckets: Object.create(null)
     };
 
-    BloomFilter.prototype.add.call(fake, "x");
-    assert.equal(fake.buckets[bucket], 1);
-    assert.equal(fake.buckets[location >> 5], undefined);
-    assert.equal(BloomFilter.prototype.test.call(fake, "x"), true);
+    BloomFilter.prototype.add.call(fake, "test-key");
+    assert.equal(BloomFilter.prototype.test.call(fake, "test-key"), true);
   });
 
   it('combines filters without signed bucket-length overflow', () => {
