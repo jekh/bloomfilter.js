@@ -55,14 +55,24 @@ export class BloomFilter {
     const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
     const ArrayType = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
     const kbuffer = new ArrayBuffer(kbytes * k);
-    const buckets = new Uint32Array(n);
-    if (a) {
-      for (let i = 0; i < n; ++i) {
-        const value = a[i];
-        assertBucketValue(value);
-        buckets[i] = value;
+
+    let buckets;
+    if (a instanceof Uint32Array) {
+      // Uint32Array already guarantees uint32 bucket values; the native
+      // typed-array copy avoids validation overhead without aliasing input.
+      buckets = new Uint32Array(a);
+    } else {
+      buckets = new Uint32Array(n);
+      if (a) {
+        const inputLen = Math.min(a.length, n);
+        for (let i = 0; i < inputLen; ++i) {
+          const value = a[i];
+          assertBucketValue(value);
+          buckets[i] = value;
+        }
       }
     }
+
     this.buckets = buckets;
     this._locations = new ArrayType(kbuffer);
   }

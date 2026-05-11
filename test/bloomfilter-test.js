@@ -222,6 +222,18 @@ describe('bloom filter', () => {
     assert.ok(intersection.buckets instanceof Uint32Array);
   });
 
+  it('constructor copies Uint32Array input rather than aliasing', () => {
+    const source = new Uint32Array([0xdeadbeef, 0xcafebabe, 0, 0xffffffff]);
+    const f = new BloomFilter(source, 1);
+    source[0] = 0;
+    source[1] = 0;
+    assert.equal(f.buckets[0], 0xdeadbeef);
+    assert.equal(f.buckets[1], 0xcafebabe);
+    assert.equal(f.buckets[2], 0);
+    assert.equal(f.buckets[3], 0xffffffff);
+    assert.notEqual(f.buckets.buffer, source.buffer);
+  });
+
   it('union/intersection propagate _useMask via trusted-buckets factory', () => {
     const tightA = BloomFilter.withTargetError(60_000, 1e-3);
     const tightB = BloomFilter.withTargetError(60_000, 1e-3);
