@@ -1,29 +1,55 @@
 {
-  "name": "bloomfilter",
-  "version": "1.1.0",
-  "license": "BSD-3-Clause",
-  "description": "Fast bloom filter in JavaScript.",
-  "keywords": [
-    "bloom filter",
-    "probabilistic data structure"
-  ],
-  "type": "module",
-  "homepage": "https://github.com/jasondavies/bloomfilter.js",
-  "author": {
-    "name": "Jason Davies",
-    "url": "https://www.jasondavies.com/"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/jasondavies/bloomfilter.js.git"
-  },
-  "main": "bloomfilter.js",
-  "exports": "./bloomfilter.js",
-  "files": ["bloomfilter.js"],
-  "scripts": {
-    "test": "node --test"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+	"name": "@jekh/bloomfilter",
+	"version": "1.1.0",
+	"private": true,
+	"license": "BSD-3-Clause",
+	"description": "Fast bloom filter in JavaScript.",
+	"keywords": [
+		"bloom filter",
+		"probabilistic data structure"
+	],
+	"type": "module",
+	"homepage": "https://github.com/jekh/bloomfilter.js",
+	"author": {
+		"name": "Jason Davies",
+		"url": "https://www.jasondavies.com/"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/jekh/bloomfilter.js.git"
+	},
+	"bugs": {
+		"url": "https://github.com/jekh/bloomfilter.js/issues"
+	},
+	"main": "bloomfilter.js",
+	"types": "bloomfilter.d.ts",
+	"exports": {
+		".": {
+			"types": "./bloomfilter.d.ts",
+			"import": "./bloomfilter.js",
+			"default": "./bloomfilter.js"
+		}
+	},
+	"files": [
+		"bloomfilter.js",
+		"bloomfilter.d.ts",
+		"bloomfilter.ts"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"check": "biome check .",
+		"format": "biome check --write .",
+		"lint": "biome check --error-on-warnings",
+		"lint:fix": "biome check --write",
+		"prepack": "npm run build",
+		"test": "npm run build && tsc -p tsconfig.test.json && node --test .test/test/bloomfilter-test.js"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.15",
+		"@types/node": "^24.0.0",
+		"typescript": "^6.0.3"
+	},
+	"engines": {
+		"node": ">=18.0.0"
+	}
 }
