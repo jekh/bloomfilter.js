@@ -137,6 +137,28 @@ describe('bloom filter', () => {
     assert.ok(Math.abs(f.error() - 1e-5) <= 1e-5, 'Error within delta');
   });
 
+  it('withTargetError theoretical FPR is always <= requested target', () => {
+    const cases = [
+      [1_000, 0.01],
+      [1_000, 0.001],
+      [1_000, 0.0001],
+      [10_000, 0.01],
+      [60_000, 0.001],
+      [100_000, 1e-4],
+      [1_000_000, 1e-6],
+      [50, 1e-3],
+      [100, 1e-9]
+    ];
+    for (const [n, target] of cases) {
+      const f = BloomFilter.withTargetError(n, target);
+      const theoreticalFpr = Math.pow(1 - Math.exp(-f.k * n / f.m), f.k);
+      assert.ok(
+        theoreticalFpr <= target,
+        `n=${n} target=${target}: m=${f.m} k=${f.k} produced theoretical FPR ${theoreticalFpr}`
+      );
+    }
+  });
+
   it('withTargetError defaults storage to tight', () => {
     const f = BloomFilter.withTargetError(100, 1e-5);
     assert.equal(f.m, 2400);

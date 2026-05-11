@@ -348,13 +348,43 @@ export class BloomFilter {
    * @param {number} n - Expected number of items to be added.
    * @param {number} error - Target false-positive rate (0 < error < 1).
    * @param {object} [options] - Forwarded to the constructor.
+   *
+   * Searches integer k values near k* = log2(1 / error), using
+   * m = ceil(-k * n / ln(1 - error^(1 / k))) for each candidate.
+   * Picks the smallest m whose theoretical false-positive rate is <= error.
    */
   static withTargetError (n, error, options) {
     assertExpectedSize(n);
     assertTargetError(error);
-    const m = Math.ceil(-n * Math.log2(error) / Math.LN2);
-    const k = Math.ceil(Math.LN2 * m / n);
-    return new BloomFilter(m, k, options);
+
+    const idealK = Math.log2(1 / error);
+    const candidates = [
+      Math.floor(idealK) - 1,
+      Math.floor(idealK),
+      Math.ceil(idealK),
+      Math.ceil(idealK) + 1
+    ];
+
+    let bestM = Infinity;
+    let bestK = -1;
+    for (const k of candidates) {
+      if (k < 1) continue;
+      const denom = Math.log(1 - Math.pow(error, 1 / k));
+      if (!Number.isFinite(denom) || denom >= 0) continue;
+      const m = Math.ceil(-k * n / denom);
+      if (m < bestM) {
+        bestM = m;
+        bestK = k;
+      }
+    }
+
+    if (bestK < 1 || !Number.isFinite(bestM)) {
+      throw new RangeError(
+        `withTargetError could not find a valid (m, k) for n=${n}, error=${error}.`
+      );
+    }
+
+    return new BloomFilter(bestM, bestK, options);
   }
 };
 
