@@ -1,6 +1,26 @@
 const MAX_BITS = 0x100000000;
 const MAX_BUCKETS = MAX_BITS / 32;
 const SERIALISATION_VERSION = 1;
+const BLOOM_BINARY_VERSION = 1;
+const BLOOM_BINARY_HEADER_LENGTH = 24;
+const HASH_ID_FNV1A64 = 1;
+const DEFAULT_HASH_NAME = "fnv1a64";
+const DEFAULT_HASH_ID = HASH_ID_FNV1A64;
+
+const HASH_NAME_BY_ID = Object.freeze({
+  [HASH_ID_FNV1A64]: DEFAULT_HASH_NAME
+});
+const HASH_ID_BY_NAME = Object.freeze({
+  [DEFAULT_HASH_NAME]: HASH_ID_FNV1A64
+});
+
+const HOST_IS_LITTLE_ENDIAN = (() => {
+  const probe = new Uint16Array([1]);
+  return new Uint8Array(probe.buffer)[0] === 1;
+})();
+
+const HAS_UINT8_TO_BASE64 = typeof Uint8Array.prototype.toBase64 === "function";
+const HAS_UINT8_FROM_BASE64 = typeof Uint8Array.fromBase64 === "function";
 
 // Hash and location generation are inlined into add() and test() to avoid a
 // scratch-buffer round-trip per bit and to let test() return on the first
@@ -51,6 +71,7 @@ export class BloomFilter {
     this.m = m;
     this.k = k;
     this._useMask = isPowerOf2(m);
+    this._hashId = DEFAULT_HASH_ID;
 
     const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
     const ArrayType = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
@@ -274,13 +295,94 @@ export class BloomFilter {
     return Math.pow(this.countBits() / this.m, this.k);
   }
 
-  toJSON() {
-    return {
+  /**
+   * Serialize as a JSON-compatible object.
+   * @param {object} [options]
+   * @param {"array"|"base64"} [options.encoding="array"] - "array" preserves
+   *     the legacy decimal bucket array. "base64" stores little-endian bucket
+   *     bytes in a string when the runtime supports typed-array base64 APIs.
+   */
+  toJSON(options) {
+    const hashName = HASH_NAME_BY_ID[this._hashId ?? DEFAULT_HASH_ID];
+    const hashField = (this._hashId ?? DEFAULT_HASH_ID) === DEFAULT_HASH_ID ? null : hashName;
+
+    if (options && options.encoding === "base64") {
+      if (!HAS_UINT8_TO_BASE64) {
+        throw new Error(
+          "BloomFilter.toJSON({encoding:'base64'}) requires Uint8Array.prototype.toBase64. "
+          + "This runtime does not support it; use the default array encoding or call toBytes()."
+        );
+      }
+      const out = {
+        version: SERIALISATION_VERSION,
+        m: this.m,
+        k: this.k,
+        encoding: "base64",
+        buckets: bucketsToLEBase64(this.buckets)
+      };
+      if (hashField) out.hash = hashField;
+      return out;
+    }
+    if (options && options.encoding !== undefined && options.encoding !== "array") {
+      throw new RangeError(`Unsupported BloomFilter serialisation encoding: ${options.encoding}.`);
+    }
+
+    const out = {
       version: SERIALISATION_VERSION,
       m: this.m,
       k: this.k,
       buckets: Array.from(this.buckets)
     };
+    if (hashField) out.hash = hashField;
+    return out;
+  }
+
+  /**
+   * Serialize as a self-contained Uint8Array:
+   * "BLMF" magic, format version, hash id, m, k, bucket count, then buckets.
+   */
+  toBytes() {
+    const buckets = this.buckets;
+    const bucketByteCount = buckets.length * 4;
+    const buf = new ArrayBuffer(BLOOM_BINARY_HEADER_LENGTH + bucketByteCount);
+    const header = new Uint8Array(buf, 0, 8);
+    header[0] = 0x42; header[1] = 0x4c; header[2] = 0x4d; header[3] = 0x46; // "BLMF"
+    header[4] = BLOOM_BINARY_VERSION;
+    header[5] = this._hashId ?? DEFAULT_HASH_ID;
+    header[6] = 0;
+    header[7] = BLOOM_BINARY_HEADER_LENGTH;
+
+    const view = new DataView(buf);
+    view.setUint32(8, this.m, true);
+    view.setUint32(12, this.k, true);
+    view.setUint32(16, buckets.length, true);
+    view.setUint32(20, 0, true);
+
+    if (HOST_IS_LITTLE_ENDIAN) {
+      new Uint8Array(buf, BLOOM_BINARY_HEADER_LENGTH, bucketByteCount).set(
+        new Uint8Array(buckets.buffer, buckets.byteOffset, bucketByteCount)
+      );
+    } else {
+      for (let i = 0; i < buckets.length; ++i) {
+        view.setUint32(BLOOM_BINARY_HEADER_LENGTH + i * 4, buckets[i], true);
+      }
+    }
+
+    return new Uint8Array(buf);
+  }
+
+  toArrayBuffer() {
+    return this.toBytes().buffer;
+  }
+
+  toBase64() {
+    if (!HAS_UINT8_TO_BASE64) {
+      throw new Error(
+        "BloomFilter.toBase64() requires Uint8Array.prototype.toBase64. "
+        + "This runtime does not support it; use toBytes() with an external base64 codec."
+      );
+    }
+    return this.toBytes().toBase64();
   }
 
   // Static methods.
@@ -293,12 +395,121 @@ export class BloomFilter {
       throw new RangeError(`Unsupported BloomFilter serialisation format version: ${data.version}.`);
     }
 
+    const hashName = data.hash ?? DEFAULT_HASH_NAME;
+    if (!(hashName in HASH_ID_BY_NAME)) {
+      throw new RangeError(
+        `Unsupported BloomFilter hash: ${hashName}. Known: ${Object.keys(HASH_ID_BY_NAME).join(", ")}.`
+      );
+    }
+
+    if (data.encoding === "base64") {
+      if (!HAS_UINT8_FROM_BASE64) {
+        throw new Error(
+          "BloomFilter.fromJSON received a base64-encoded payload but this runtime "
+          + "does not support Uint8Array.fromBase64. Use toJSON() (default encoding) "
+          + "to produce array-form payloads, or upgrade your runtime."
+        );
+      }
+      if (typeof data.buckets !== "string") {
+        throw new RangeError("Serialised BloomFilter with encoding='base64' must have a string buckets field.");
+      }
+      const bytes = Uint8Array.fromBase64(data.buckets);
+      if ((bytes.byteLength & 3) !== 0) {
+        throw new RangeError("Serialised BloomFilter buckets length must be a multiple of 4 bytes.");
+      }
+      const expectedM = (bytes.byteLength >>> 2) * 32;
+      if (data.m !== undefined && data.m !== expectedM) {
+        throw new RangeError("Serialised BloomFilter has inconsistent m and buckets.");
+      }
+      return new BloomFilter(leBytesToBuckets(bytes), data.k);
+    }
+
+    if (data.encoding !== undefined && data.encoding !== "array") {
+      throw new RangeError(`Unsupported BloomFilter serialisation encoding: ${data.encoding}.`);
+    }
+
     const expectedM = data.buckets.length * 32;
     if (data.m !== undefined && data.m !== expectedM) {
       throw new RangeError("Serialised BloomFilter has inconsistent m and buckets.");
     }
 
     return new BloomFilter(data.buckets, data.k);
+  }
+
+  static fromBytes(bytes) {
+    if (!(bytes instanceof Uint8Array)) {
+      throw new TypeError("BloomFilter.fromBytes requires a Uint8Array.");
+    }
+    if (bytes.byteLength < BLOOM_BINARY_HEADER_LENGTH) {
+      throw new RangeError("Truncated BloomFilter binary payload (header too short).");
+    }
+    if (bytes[0] !== 0x42 || bytes[1] !== 0x4c || bytes[2] !== 0x4d || bytes[3] !== 0x46) {
+      throw new RangeError("Invalid BloomFilter binary magic - not a recognized payload.");
+    }
+    const version = bytes[4];
+    if (version !== BLOOM_BINARY_VERSION) {
+      throw new RangeError(`Unsupported BloomFilter binary format version: ${version}.`);
+    }
+    const hashId = bytes[5];
+    const hashName = HASH_NAME_BY_ID[hashId];
+    if (hashName === undefined) {
+      throw new RangeError(
+        `Unsupported BloomFilter hash id: ${hashId}. This filter was serialized `
+        + `with a hash variant this runtime does not recognize. Known ids: `
+        + `${Object.keys(HASH_NAME_BY_ID).join(", ")}.`
+      );
+    }
+    const headerLen = bytes[7];
+    if (headerLen !== BLOOM_BINARY_HEADER_LENGTH) {
+      throw new RangeError(`Unexpected BloomFilter header length: ${headerLen}.`);
+    }
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const m = view.getUint32(8, true);
+    const k = view.getUint32(12, true);
+    const bucketCount = view.getUint32(16, true);
+
+    if (m !== bucketCount * 32) {
+      throw new RangeError("Serialised BloomFilter has inconsistent m and bucket count.");
+    }
+    const expectedLength = headerLen + bucketCount * 4;
+    if (bytes.byteLength !== expectedLength) {
+      throw new RangeError(
+        `BloomFilter binary payload length mismatch: expected ${expectedLength}, got ${bytes.byteLength}.`
+      );
+    }
+
+    let buckets;
+    if (HOST_IS_LITTLE_ENDIAN) {
+      buckets = new Uint32Array(bytes.buffer, bytes.byteOffset + headerLen, bucketCount);
+    } else {
+      buckets = new Uint32Array(bucketCount);
+      for (let i = 0; i < bucketCount; ++i) {
+        buckets[i] = view.getUint32(headerLen + i * 4, true);
+      }
+    }
+
+    return new BloomFilter(buckets, k);
+  }
+
+  static fromArrayBuffer(buffer) {
+    if (!(buffer instanceof ArrayBuffer)) {
+      throw new TypeError("BloomFilter.fromArrayBuffer requires an ArrayBuffer.");
+    }
+    return BloomFilter.fromBytes(new Uint8Array(buffer));
+  }
+
+  static fromBase64(text) {
+    if (!HAS_UINT8_FROM_BASE64) {
+      throw new Error(
+        "BloomFilter.fromBase64() requires Uint8Array.fromBase64. "
+        + "This runtime does not support it; decode externally and call fromBytes()."
+      );
+    }
+    if (typeof text !== "string") {
+      throw new TypeError("BloomFilter.fromBase64 requires a string.");
+    }
+    return BloomFilter.fromBytes(Uint8Array.fromBase64(text));
   }
 
   // Internal factory: takes ownership of a freshly-created Uint32Array without
@@ -311,6 +522,7 @@ export class BloomFilter {
     filter.k = k;
     filter.buckets = buckets;
     filter._useMask = isPowerOf2(m);
+    filter._hashId = DEFAULT_HASH_ID;
 
     const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
     const ArrayType = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
@@ -403,6 +615,29 @@ function nextPowerOf2(n) {
 function isPowerOf2(n) {
   // Bit trick is valid for our m range [1, 2^32]; MAX_BITS enforces the upper bound.
   return n > 0 && (n & (n - 1)) === 0;
+}
+
+function bucketsToLEBase64(buckets) {
+  const bytes = HOST_IS_LITTLE_ENDIAN
+    ? new Uint8Array(buckets.buffer, buckets.byteOffset, buckets.byteLength)
+    : (() => {
+        const out = new Uint8Array(buckets.byteLength);
+        const view = new DataView(out.buffer);
+        for (let i = 0; i < buckets.length; ++i) view.setUint32(i * 4, buckets[i], true);
+        return out;
+      })();
+  return bytes.toBase64();
+}
+
+function leBytesToBuckets(bytes) {
+  if (HOST_IS_LITTLE_ENDIAN) {
+    return new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >>> 2);
+  }
+  const count = bytes.byteLength >>> 2;
+  const buckets = new Uint32Array(count);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < count; ++i) buckets[i] = view.getUint32(i * 4, true);
+  return buckets;
 }
 
 function assertBitSize(m) {

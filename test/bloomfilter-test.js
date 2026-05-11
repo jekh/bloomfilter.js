@@ -63,12 +63,131 @@ describe('bloom filter', () => {
     assert.equal(restored.test("Emily"), false);
   });
 
+  it('binary serialisation round-trips via toBytes / fromBytes', () => {
+    const f = BloomFilter.withTargetError(1000, 1e-4);
+    f.add("alpha");
+    f.add("beta");
+    f.add("gamma");
+
+    const bytes = f.toBytes();
+    assert.ok(bytes instanceof Uint8Array);
+    assert.equal(bytes[0], 0x42);
+    assert.equal(bytes[1], 0x4c);
+    assert.equal(bytes[2], 0x4d);
+    assert.equal(bytes[3], 0x46);
+    assert.equal(bytes[4], 1);
+    assert.equal(bytes[5], 1);
+    assert.equal(bytes[6], 0);
+    assert.equal(bytes[7], 24);
+
+    const restored = BloomFilter.fromBytes(bytes);
+    assert.equal(restored.m, f.m);
+    assert.equal(restored.k, f.k);
+    assert.equal(restored.test("alpha"), true);
+    assert.equal(restored.test("beta"), true);
+    assert.equal(restored.test("gamma"), true);
+    assert.equal(restored.test("delta"), false);
+  });
+
+  it('binary serialisation round-trips via toArrayBuffer / fromArrayBuffer', () => {
+    const f = BloomFilter.withTargetError(1000, 1e-4);
+    f.add("alpha");
+    f.add("beta");
+
+    const buffer = f.toArrayBuffer();
+    assert.ok(buffer instanceof ArrayBuffer);
+    const restored = BloomFilter.fromArrayBuffer(buffer);
+    assert.equal(restored.test("alpha"), true);
+    assert.equal(restored.test("beta"), true);
+    assert.equal(restored.test("gamma"), false);
+  });
+
+  it('binary serialisation preserves _useMask through round-trip', () => {
+    const tight = BloomFilter.withTargetError(60_000, 1e-3);
+    const pow2 = BloomFilter.withTargetError(60_000, 1e-3, { storage: "pow2" });
+    assert.equal(BloomFilter.fromBytes(tight.toBytes())._useMask, false);
+    assert.equal(BloomFilter.fromBytes(pow2.toBytes())._useMask, true);
+  });
+
+  it('fromBytes rejects invalid payloads', () => {
+    const bytes = new Uint8Array(24);
+    bytes[0] = 0x42;
+    bytes[1] = 0x41;
+    bytes[2] = 0x44;
+    bytes[3] = 0x21;
+    assert.throws(() => BloomFilter.fromBytes(bytes), /Invalid BloomFilter binary magic/);
+
+    const f = BloomFilter.withTargetError(100, 1e-4);
+    const unsupportedVersion = f.toBytes();
+    unsupportedVersion[4] = 99;
+    assert.throws(() => BloomFilter.fromBytes(unsupportedVersion), /Unsupported BloomFilter binary format version/);
+
+    const unknownHash = f.toBytes();
+    unknownHash[5] = 99;
+    assert.throws(() => BloomFilter.fromBytes(unknownHash), /Unsupported BloomFilter hash id/);
+
+    assert.throws(() => BloomFilter.fromBytes(f.toBytes().slice(0, 8)), /header length|payload length|bucket count|header too short/);
+    assert.throws(() => BloomFilter.fromBytes(new Uint8Array(8)), /header too short/);
+  });
+
+  it('toJSON / fromJSON support encoding:"base64" round-trip', {
+    skip: typeof Uint8Array.prototype.toBase64 !== "function" || typeof Uint8Array.fromBase64 !== "function"
+  }, () => {
+    const f = BloomFilter.withTargetError(1000, 1e-4);
+    f.add("hello");
+    f.add("world");
+
+    const compact = f.toJSON({ encoding: "base64" });
+    assert.equal(compact.encoding, "base64");
+    assert.equal(typeof compact.buckets, "string");
+    assert.equal(compact.hash, undefined);
+    assert.equal(compact.m, f.m);
+    assert.equal(compact.k, f.k);
+
+    const restored = BloomFilter.fromJSON(JSON.stringify(compact));
+    assert.equal(restored.test("hello"), true);
+    assert.equal(restored.test("world"), true);
+    assert.equal(restored.test("xyzzy"), false);
+  });
+
+  it('toBase64 / fromBase64 round-trip', {
+    skip: typeof Uint8Array.prototype.toBase64 !== "function" || typeof Uint8Array.fromBase64 !== "function"
+  }, () => {
+    const f = BloomFilter.withTargetError(1000, 1e-4);
+    f.add("a");
+    f.add("b");
+
+    const text = f.toBase64();
+    assert.equal(typeof text, "string");
+    const restored = BloomFilter.fromBase64(text);
+    assert.equal(restored.test("a"), true);
+    assert.equal(restored.test("b"), true);
+    assert.equal(restored.test("c"), false);
+  });
+
+  it('JSON serialisation omits hash field for default variant', () => {
+    const f = new BloomFilter(1024, 4);
+    f.add("x");
+    assert.equal(f.toJSON().hash, undefined);
+  });
+
+  it('JSON deserialisation accepts fnv1a64 hash field', () => {
+    const f = new BloomFilter(1024, 4);
+    f.add("x");
+    const payload = f.toJSON();
+    payload.hash = "fnv1a64";
+    const restored = BloomFilter.fromJSON(payload);
+    assert.equal(restored.test("x"), true);
+  });
+
   it('rejects invalid serialised filters', () => {
     assert.throws(() => BloomFilter.fromJSON(null), /must be an object or JSON string/);
     assert.throws(() => BloomFilter.fromJSON({ version: 1, buckets: [1] }), /must include k/);
     assert.throws(() => BloomFilter.fromJSON({ version: 1, k: 1 }), /must include buckets/);
     assert.throws(() => BloomFilter.fromJSON({ version: 2, k: 1, buckets: [1] }), /Unsupported BloomFilter serialisation format version/);
     assert.throws(() => BloomFilter.fromJSON({ version: 1, m: 64, k: 1, buckets: [1] }), /inconsistent m and buckets/);
+    assert.throws(() => BloomFilter.fromJSON({ version: 1, m: 32, k: 1, encoding: "wat", buckets: "" }), /Unsupported BloomFilter serialisation encoding/);
+    assert.throws(() => BloomFilter.fromJSON({ version: 1, m: 1024, k: 4, hash: "bogus", buckets: new Array(32).fill(0) }), /Unsupported BloomFilter hash/);
   });
 
   it('rejects invalid constructor inputs', () => {
