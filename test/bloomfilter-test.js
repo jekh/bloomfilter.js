@@ -247,6 +247,22 @@ describe('bloom filter', () => {
     assert.equal(f.countBits(), 4);
   });
 
+  it('isSaturated', () => {
+    const fresh = new BloomFilter(1024, 4);
+    assert.equal(fresh.isSaturated(), false);
+
+    const tiny = new BloomFilter(64, 8);
+    for (let i = 0; i < 1000; ++i) tiny.add("x:" + i);
+    assert.equal(tiny.isSaturated(), true);
+    assert.equal(tiny.countBits(), tiny.m);
+    assert.equal(Number.isFinite(tiny.size()), false);
+
+    const partial = new BloomFilter(1024, 4);
+    partial.add("a");
+    partial.add("b");
+    assert.equal(partial.isSaturated(), false);
+  });
+
   it('withTargetError/error', () => {
     const f = BloomFilter.withTargetError(100, 1e-5);
     for (let i = 0; i < 100; ++i) {

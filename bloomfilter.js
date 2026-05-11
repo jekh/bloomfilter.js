@@ -291,6 +291,14 @@ export class BloomFilter {
     return bits;
   }
 
+  /**
+   * True if and only if every bit in the filter is set. Saturated filters
+   * return true for every membership test, and size() returns Infinity.
+   */
+  isSaturated() {
+    return this.countBits() >= this.m;
+  }
+
   error() {
     return Math.pow(this.countBits() / this.m, this.k);
   }
