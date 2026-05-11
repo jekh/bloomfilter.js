@@ -228,6 +228,24 @@ export class BloomFilter {
     return new BloomFilter(data.buckets, data.k);
   }
 
+  // Internal factory: takes ownership of a freshly-created Uint32Array without
+  // copying or validating it. Callers must only pass buckets produced inside
+  // this module, not untrusted external input.
+  static _fromTrustedBuckets(buckets, k) {
+    const m = buckets.length * 32;
+    const filter = Object.create(BloomFilter.prototype);
+    filter.m = m;
+    filter.k = k;
+    filter.buckets = buckets;
+
+    const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
+    const ArrayType = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
+    const kbuffer = new ArrayBuffer(kbytes * k);
+    filter._locations = new ArrayType(kbuffer);
+
+    return filter;
+  }
+
   static union(a, b) {
     if (a.m === b.m && a.k === b.k && a.buckets.length === b.buckets.length) {
       const l = a.buckets.length;
@@ -235,7 +253,7 @@ export class BloomFilter {
       for (let i = 0; i < l; ++i) {
         c[i] = a.buckets[i] | b.buckets[i];
       }
-      return new BloomFilter(c, a.k);
+      return BloomFilter._fromTrustedBuckets(c, a.k);
     }
     throw new Error("Bloom filters must have identical {m, k}.");
   }
@@ -247,7 +265,7 @@ export class BloomFilter {
       for (let i = 0; i < l; ++i) {
         c[i] = a.buckets[i] & b.buckets[i];
       }
-      return new BloomFilter(c, a.k);
+      return BloomFilter._fromTrustedBuckets(c, a.k);
     }
     throw new Error("Bloom filters must have identical {m, k}.");
   }

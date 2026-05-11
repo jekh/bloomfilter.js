@@ -152,6 +152,19 @@ describe('bloom filter', () => {
     }
   });
 
+  it('union and intersection take ownership of trusted bucket arrays', () => {
+    const f0 = new BloomFilter([0b01], 1);
+    const f1 = new BloomFilter([0b10], 1);
+
+    const union = BloomFilter.union(f0, f1);
+    const intersection = BloomFilter.intersection(f0, f1);
+
+    assert.equal(union.buckets[0], 0b11);
+    assert.equal(intersection.buckets[0], 0b00);
+    assert.ok(union.buckets instanceof Uint32Array);
+    assert.ok(intersection.buckets instanceof Uint32Array);
+  });
+
   it('intersection', () => {
     const f0 = BloomFilter.withTargetError(100, 1e-5);
     const f1 = BloomFilter.withTargetError(100, 1e-5);
