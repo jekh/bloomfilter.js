@@ -127,8 +127,12 @@ export class BloomFilter {
       if (b < 0) b += m;
       r[0] = a;
       for (let i = 1; i < k; ++i) {
-        a = (a + b) % m;
-        b = (b + i) % m;
+        // a and b are already reduced, so one subtract is equivalent to
+        // (a + b) % m in the common case and avoids a modulo operation.
+        a = a + b;
+        if (a >= m) a -= m;
+        b = b + i;
+        if (b >= m) b %= m;
         r[i] = a;
       }
     }
@@ -184,8 +188,10 @@ export class BloomFilter {
 
       buckets[a >>> 5] |= 1 << (a & 0x1f);
       for (let i = 1; i < k; ++i) {
-        a = (a + b) % m;
-        b = (b + i) % m;
+        a = a + b;
+        if (a >= m) a -= m;
+        b = b + i;
+        if (b >= m) b %= m;
         buckets[a >>> 5] |= 1 << (a & 0x1f);
       }
     }
@@ -240,8 +246,10 @@ export class BloomFilter {
 
       if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
       for (let i = 1; i < k; ++i) {
-        a = (a + b) % m;
-        b = (b + i) % m;
+        a = a + b;
+        if (a >= m) a -= m;
+        b = b + i;
+        if (b >= m) b %= m;
         if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
       }
     }
