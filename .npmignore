@@ -1,2 +1,8 @@
-test/
-.DS_Store
+# Ignore everything except the files that make up the published package.
+**/*
+
+!package.json
+!README.md
+!LICENSE
+!bloomfilter.js
+!bloomfilter.d.ts
