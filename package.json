@@ -45,8 +45,8 @@
 		"test": "npm run build && tsc -p tsconfig.test.json && node --test .test/test/bloomfilter-test.js"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.4.15",
-		"@types/node": "^22.0.0",
+		"@biomejs/biome": "^2.5.12",
+		"@types/node": "^22.20.2",
 		"typescript": "^7.0.2"
 	},
 	"engines": {
