@@ -503,6 +503,54 @@ describe("bloom filter", () => {
 		);
 	});
 
+	it("locations() agrees with add()/test()", () => {
+		for (const [m, k] of [
+			[1000, 4],
+			[1024, 4],
+			[2400, 16],
+			[33, 16],
+		] as const) {
+			const f = new BloomFilter(m, k);
+			f.add("hello");
+			const fromLocations = new Set(f.locations("hello"));
+			const fromBuckets = new Set<number>();
+			for (let i = 0; i < f.m; ++i) {
+				if ((f.buckets[i >>> 5] & (1 << (i & 0x1f))) !== 0) fromBuckets.add(i);
+			}
+			assert.deepEqual(fromLocations, fromBuckets);
+		}
+	});
+
+	it("defers _locations allocation until locations() is called", () => {
+		const f = new BloomFilter(2400, 16);
+		assert.equal(f._locationsCache, null);
+		f.add("x");
+		assert.equal(f.test("x"), true);
+		assert.equal(f._locationsCache, null);
+
+		f.locations("x");
+		const cache: unknown = f._locationsCache;
+		assert.ok(cache instanceof Uint16Array);
+		assert.equal(cache.length, 16);
+		// Aliasing preserved: same scratch object across calls.
+		assert.equal(f.locations("x"), cache);
+
+		const u = BloomFilter.union(
+			new BloomFilter([1], 1),
+			new BloomFilter([2], 1),
+		);
+		assert.equal(u._locationsCache, null);
+		u.locations("x");
+		const unionCache: unknown = u._locationsCache;
+		assert.ok(unionCache instanceof Uint8Array);
+	});
+
+	it("deserialisation with huge k allocates no locations scratch", () => {
+		const f = BloomFilter.fromJSON({ version: 1, k: 10000000, buckets: [0] });
+		assert.equal(f._locationsCache, null);
+		assert.equal(f.k, 10000000);
+	});
+
 	it("constructor copies Uint32Array input rather than aliasing", () => {
 		const source = new Uint32Array([0xdeadbeef, 0xcafebabe, 0, 0xffffffff]);
 		const f = new BloomFilter(source, 1);

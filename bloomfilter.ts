@@ -85,9 +85,39 @@ export class BloomFilter {
 	m: number;
 	k: number;
 	buckets: Uint32Array;
-	_locations: LocationArray;
+	_locationsCache: LocationArray | null = null;
 	_useMask: boolean;
 	_hashId: number;
+
+	/**
+	 * Lazily-allocated scratch for the legacy locations() API. add(), test(),
+	 * construction, and deserialisation never touch it, so attacker- or
+	 * caller-controlled k causes no allocation until locations() is called.
+	 * The guard rebuilds when k changes or the cached element width no longer
+	 * fits m, so direct .m mutations within the same width class behave
+	 * exactly as before. (.m/.k are effectively read-only after construction:
+	 * mutating them already leaves _useMask stale.)
+	 */
+	get _locations(): LocationArray {
+		// NB: `_locationsCache` may be undefined (not null) on instances built
+		// via Object.create, which skips class-field initializers.
+		const cached = this._locationsCache;
+		if (
+			cached === null ||
+			cached === undefined ||
+			cached.length !== this.k ||
+			cached.BYTES_PER_ELEMENT !== locationWidth(this.m)
+		) {
+			const r = makeLocationArray(this.m, this.k);
+			this._locationsCache = r;
+			return r;
+		}
+		return cached;
+	}
+
+	set _locations(v: LocationArray) {
+		this._locationsCache = v;
+	}
 
 	/**
 	 * @param m - Number of bits, or an array of integers to load.
@@ -159,12 +189,16 @@ export class BloomFilter {
 		}
 
 		this.buckets = buckets;
-		this._locations = makeLocationArray(bitSize, k);
 	}
 
 	// Retained for compatibility; add() and test() inline this loop to avoid
 	// scratch-buffer writes and to allow early exits.
 	// See http://willwhim.wpengine.com/2011/09/03/producing-n-hash-functions-by-hashing-only-once/
+	/**
+	 * @deprecated Legacy compatibility API. Prefer add()/test(), which compute
+	 * the same positions without touching this buffer. Returns a reused
+	 * scratch array — copy the result if you need to keep it.
+	 */
 	locations(v: string): LocationArray {
 		const k = this.k;
 		const m = this.m;
@@ -689,7 +723,7 @@ export class BloomFilter {
 		filter._useMask = isPowerOf2(m);
 		filter._hashId = DEFAULT_HASH_ID;
 
-		filter._locations = makeLocationArray(m, k);
+		filter._locationsCache = null;
 
 		return filter;
 	}
@@ -811,8 +845,17 @@ function leBytesToBuckets(bytes: Uint8Array): Uint32Array {
 	return buckets;
 }
 
+// Element width in bytes for a scratch array holding positions in [0, m).
+// Matches makeLocationArray's historical float sizing bit-for-bit on every
+// input, including degenerate m (which historically yielded 1-byte elements),
+// so the lazy-_locations guard and the allocator cannot drift apart.
+function locationWidth(m: number): 1 | 2 | 4 {
+	if (!(m > 0) || m === Number.POSITIVE_INFINITY) return 1;
+	return m <= 256 ? 1 : m <= 65536 ? 2 : 4;
+}
+
 function makeLocationArray(m: number, k: number): LocationArray {
-	const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(m) / 8)));
+	const kbytes = locationWidth(m);
 	const ArrayType: LocationArrayConstructor =
 		kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
 	return new ArrayType(new ArrayBuffer(kbytes * k));
