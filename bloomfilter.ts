@@ -121,6 +121,8 @@ export class BloomFilter {
 
 	/**
 	 * @param m - Number of bits, or an array of integers to load.
+	 *     Array-like bucket inputs are read twice (validate, then copy) and
+	 *     must return stable values across reads.
 	 * @param k - Number of hashing functions.
 	 * @param options
 	 * @param options.storage - Storage rounding policy
@@ -179,10 +181,10 @@ export class BloomFilter {
 				assertBucketValue(a[i]);
 			}
 			buckets = new Uint32Array(n);
+			// No re-validation here: the pass above already rejected invalid
+			// inputs, and inputs must be stable across reads (see contract).
 			for (let i = 0; i < inputLen; ++i) {
-				const value = a[i];
-				assertBucketValue(value);
-				buckets[i] = value;
+				buckets[i] = a[i];
 			}
 		} else {
 			buckets = new Uint32Array(n);
