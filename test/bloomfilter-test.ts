@@ -247,6 +247,20 @@ describe("bloom filter", () => {
 				}),
 			/Unsupported BloomFilter hash/,
 		);
+		// The hash allowlist must not match inherited Object.prototype names.
+		for (const hash of ["toString", "constructor", "hasOwnProperty"]) {
+			assert.throws(
+				() =>
+					BloomFilter.fromJSON({
+						version: 1,
+						m: 32,
+						k: 1,
+						hash,
+						buckets: [0],
+					}),
+				/Unsupported BloomFilter hash/,
+			);
+		}
 	});
 
 	it("rejects invalid constructor inputs", () => {

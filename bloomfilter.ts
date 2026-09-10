@@ -507,7 +507,9 @@ export class BloomFilter {
 		}
 
 		const hashName = data.hash ?? DEFAULT_HASH_NAME;
-		if (!(hashName in HASH_ID_BY_NAME)) {
+		// Object.hasOwn (not `in`): the allowlist must not match inherited
+		// Object.prototype names such as "toString" or "constructor".
+		if (!Object.hasOwn(HASH_ID_BY_NAME, hashName)) {
 			throw new RangeError(
 				`Unsupported BloomFilter hash: ${hashName}. Known: ${Object.keys(HASH_ID_BY_NAME).join(", ")}.`,
 			);
