@@ -424,9 +424,17 @@ export class BloomFilter {
 	/**
 	 * True if and only if every bit in the filter is set. Saturated filters
 	 * return true for every membership test, and size() returns Infinity.
+	 *
+	 * Early-exits on the first non-full word instead of counting all bits.
+	 * This is exact because m is always a multiple of 32, so there are no
+	 * partial words to mask.
 	 */
 	isSaturated(): boolean {
-		return this.countBits() >= this.m;
+		const buckets = this.buckets;
+		for (let i = 0; i < buckets.length; ++i) {
+			if (buckets[i] !== 0xffffffff) return false;
+		}
+		return true;
 	}
 
 	error(): number {
