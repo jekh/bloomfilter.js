@@ -77,9 +77,10 @@ const HAS_UINT8_FROM_BASE64 = typeof Uint8ArrayBase64.fromBase64 === "function";
 // scratch-buffer round-trip per bit and to let test() return on the first
 // missing bit.
 //
-// The hot path uses a bitmask when m is a power of 2, and otherwise uses the
-// existing signed modulo reduction. The public locations() method is retained
-// for compatibility.
+// The hot path uses a bitmask when m is a power of 2, and otherwise uses a
+// biased-division reduction that is bit-identical to signed modulo reduction
+// without the fmod libcall (see mBiasFor). The public locations() method is
+// retained for compatibility.
 
 export class BloomFilter {
 	m: number;
@@ -88,6 +89,14 @@ export class BloomFilter {
 	_locationsCache: LocationArray | null = null;
 	_useMask: boolean;
 	_hashId: number;
+	/**
+	 * Biased-division reduction state (R1): _mBias is the smallest multiple
+	 * of _mBiasFor that is >= 2^31 (see mBiasFor). Recomputed whenever m no
+	 * longer matches, which covers direct .m mutation (already leaves
+	 * _useMask stale) and uninitialised Object.create-built instances.
+	 */
+	_mBias: number;
+	_mBiasFor: number;
 
 	/**
 	 * Lazily-allocated scratch for the legacy locations() API. add(), test(),
@@ -166,6 +175,8 @@ export class BloomFilter {
 		this.k = k;
 		this._useMask = isPowerOf2(bitSize);
 		this._hashId = DEFAULT_HASH_ID;
+		this._mBias = mBiasFor(bitSize);
+		this._mBiasFor = bitSize;
 
 		let buckets: Uint32Array;
 		if (a instanceof Uint32Array) {
@@ -205,6 +216,12 @@ export class BloomFilter {
 		const k = this.k;
 		const m = this.m;
 		const r = this._locations;
+		let mBias = this._mBias;
+		if (this._mBiasFor !== m) {
+			// Recomputes after direct .m mutation (predicts not-taken).
+			mBias = this._mBias = mBiasFor(m);
+			this._mBiasFor = m;
+		}
 		let a: number;
 		let b: number;
 
@@ -252,9 +269,15 @@ export class BloomFilter {
 				r[i] = a;
 			}
 		} else {
-			a = a % m;
+			// R1: biased-division reduction, bit-identical to the signed
+			// `%` reduction without the fmod libcall (see mBiasFor). The
+			// fixups are ~never taken: t >= 0, so the rounded quotient
+			// errs upward only, unlike the old 50/50 sign branches.
+			let t = a + mBias;
+			a = t - Math.floor(t / m) * m;
 			if (a < 0) a += m;
-			b = b % m;
+			t = b + mBias;
+			b = t - Math.floor(t / m) * m;
 			if (b < 0) b += m;
 			r[0] = a;
 			for (let i = 1; i < k; ++i) {
@@ -274,6 +297,12 @@ export class BloomFilter {
 		const k = this.k;
 		const m = this.m;
 		const buckets = this.buckets;
+		let mBias = this._mBias;
+		if (this._mBiasFor !== m) {
+			// Recomputes after direct .m mutation (predicts not-taken).
+			mBias = this._mBias = mBiasFor(m);
+			this._mBiasFor = m;
+		}
 		// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
 		const s = v + "";
 		let a: number;
@@ -323,9 +352,15 @@ export class BloomFilter {
 				buckets[a >>> 5] |= 1 << (a & 0x1f);
 			}
 		} else {
-			a = a % m;
+			// R1: biased-division reduction, bit-identical to the signed
+			// `%` reduction without the fmod libcall (see mBiasFor). The
+			// fixups are ~never taken: t >= 0, so the rounded quotient
+			// errs upward only, unlike the old 50/50 sign branches.
+			let t = a + mBias;
+			a = t - Math.floor(t / m) * m;
 			if (a < 0) a += m;
-			b = b % m;
+			t = b + mBias;
+			b = t - Math.floor(t / m) * m;
 			if (b < 0) b += m;
 
 			buckets[a >>> 5] |= 1 << (a & 0x1f);
@@ -343,6 +378,12 @@ export class BloomFilter {
 		const k = this.k;
 		const m = this.m;
 		const buckets = this.buckets;
+		let mBias = this._mBias;
+		if (this._mBiasFor !== m) {
+			// Recomputes after direct .m mutation (predicts not-taken).
+			mBias = this._mBias = mBiasFor(m);
+			this._mBiasFor = m;
+		}
 		// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
 		const s = v + "";
 		let a: number;
@@ -392,9 +433,15 @@ export class BloomFilter {
 				if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
 			}
 		} else {
-			a = a % m;
+			// R1: biased-division reduction, bit-identical to the signed
+			// `%` reduction without the fmod libcall (see mBiasFor). The
+			// fixups are ~never taken: t >= 0, so the rounded quotient
+			// errs upward only, unlike the old 50/50 sign branches.
+			let t = a + mBias;
+			a = t - Math.floor(t / m) * m;
 			if (a < 0) a += m;
-			b = b % m;
+			t = b + mBias;
+			b = t - Math.floor(t / m) * m;
 			if (b < 0) b += m;
 
 			if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
@@ -419,6 +466,12 @@ export class BloomFilter {
 		const m = this.m;
 		const buckets = this.buckets;
 		const useMask = this._useMask;
+		let mBias = this._mBias;
+		if (this._mBiasFor !== m) {
+			// Recomputes after direct .m mutation (predicts not-taken).
+			mBias = this._mBias = mBiasFor(m);
+			this._mBiasFor = m;
+		}
 		const n = keys.length;
 		const seed = { a: 0, b: 0 };
 		if (useMask) {
@@ -426,7 +479,7 @@ export class BloomFilter {
 			for (let j = 0; j < n; ++j) {
 				// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
 				const s = keys[j] + "";
-				BloomFilter._hashPair(s, m, true, seed);
+				BloomFilter._hashPair(s, m, mBias, true, seed);
 				let a = seed.a;
 				let b = seed.b;
 				buckets[a >>> 5] |= 1 << (a & 0x1f);
@@ -440,7 +493,7 @@ export class BloomFilter {
 			for (let j = 0; j < n; ++j) {
 				// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
 				const s = keys[j] + "";
-				BloomFilter._hashPair(s, m, false, seed);
+				BloomFilter._hashPair(s, m, mBias, false, seed);
 				let a = seed.a;
 				let b = seed.b;
 				buckets[a >>> 5] |= 1 << (a & 0x1f);
@@ -464,6 +517,12 @@ export class BloomFilter {
 		const m = this.m;
 		const buckets = this.buckets;
 		const useMask = this._useMask;
+		let mBias = this._mBias;
+		if (this._mBiasFor !== m) {
+			// Recomputes after direct .m mutation (predicts not-taken).
+			mBias = this._mBias = mBiasFor(m);
+			this._mBiasFor = m;
+		}
 		const n = keys.length;
 		const out = new Array<boolean>(n);
 		const seed = { a: 0, b: 0 };
@@ -472,7 +531,7 @@ export class BloomFilter {
 			for (let j = 0; j < n; ++j) {
 				// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
 				const s = keys[j] + "";
-				BloomFilter._hashPair(s, m, true, seed);
+				BloomFilter._hashPair(s, m, mBias, true, seed);
 				let a = seed.a;
 				let b = seed.b;
 				let hit = (buckets[a >>> 5] & (1 << (a & 0x1f))) !== 0;
@@ -487,7 +546,7 @@ export class BloomFilter {
 			for (let j = 0; j < n; ++j) {
 				// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
 				const s = keys[j] + "";
-				BloomFilter._hashPair(s, m, false, seed);
+				BloomFilter._hashPair(s, m, mBias, false, seed);
 				let a = seed.a;
 				let b = seed.b;
 				let hit = (buckets[a >>> 5] & (1 << (a & 0x1f))) !== 0;
@@ -514,6 +573,7 @@ export class BloomFilter {
 	private static _hashPair(
 		s: string,
 		m: number,
+		mBias: number,
 		useMask: boolean,
 		out: { a: number; b: number },
 	): void {
@@ -558,9 +618,15 @@ export class BloomFilter {
 			a &= mask;
 			b &= mask;
 		} else {
-			a = a % m;
+			// R1: biased-division reduction, bit-identical to the signed
+			// `%` reduction without the fmod libcall (see mBiasFor). The
+			// fixups are ~never taken: t >= 0, so the rounded quotient
+			// errs upward only, unlike the old 50/50 sign branches.
+			let t = a + mBias;
+			a = t - Math.floor(t / m) * m;
 			if (a < 0) a += m;
-			b = b % m;
+			t = b + mBias;
+			b = t - Math.floor(t / m) * m;
 			if (b < 0) b += m;
 		}
 
@@ -892,6 +958,8 @@ export class BloomFilter {
 		filter.buckets = buckets;
 		filter._useMask = isPowerOf2(m);
 		filter._hashId = DEFAULT_HASH_ID;
+		filter._mBias = mBiasFor(m);
+		filter._mBiasFor = m;
 
 		filter._locationsCache = null;
 
@@ -995,6 +1063,24 @@ function nextPowerOf2(n: number): number {
 function isPowerOf2(n: number): boolean {
 	// Bit trick is valid for our m range [1, 2^32]; MAX_BITS enforces the upper bound.
 	return n > 0 && (n & (n - 1)) === 0;
+}
+
+// Smallest multiple of m that is >= 2^31. Adding it to an int32 hash half
+// keeps every intermediate value an exact double (< 2^53 for m <= 2^32),
+// and because the bias is 0 mod m the residue is unchanged. So with
+// t = a + mBiasFor(m) >= 0, `t - Math.floor(t / m) * m` equals a mod m in
+// [0, m): the correctly-rounded division of a non-negative dividend can
+// only round the quotient up across an integer boundary (never down, as
+// the true quotient is within half an ulp of a double below only when
+// that double is the boundary itself), and the single `if (r < 0) r += m`
+// fixup corrects that sub-ulp case. Exact for every integer m in
+// [1, 2^32] and int32 a — integer m is the only constructible state
+// (construction always rounds to a multiple of 32), so .m mutation to an
+// integer stays exact too. Fractional m (reachable only by mutating .m to
+// a fraction, where bucket geometry is already broken) may differ from `%`
+// by a rounding epsilon; non-positive m yields garbage, exactly as `%` does.
+function mBiasFor(m: number): number {
+	return Math.ceil(0x80000000 / m) * m;
 }
 
 function bucketsToLEBase64(buckets: Uint32Array): string {

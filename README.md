@@ -103,6 +103,17 @@ Performance improvements
     division provides a measurable speed-up for filters with moderate-to-high
     hash counts.
 
+- **Biased-division upfront reduction on the tight path** — For the default
+  tight storage mode the two upfront signed-modulo reductions are replaced
+  with a biased division that is bit-identical for integer `m` but avoids
+  the `fmod` libcall and its unpredictable sign-correction branches.
+  - A per-filter bias (the smallest multiple of `m` at or above 2^31) shifts
+    each int32 hash half non-negative without changing its residue, so one
+    correctly-rounded division plus a practically-never-taken fixup yields
+    the exact `[0, m)` position. Measured 10-28% faster add+test on tight
+    filters with short keys (up to ~28% at k=1, where reduction dominates);
+    the power-of-two bitmask path is unaffected.
+
 - **Fast-path `Uint32Array` bucket construction** — When constructing from a
   `Uint32Array` the library uses the native typed-array copy directly, skipping
   the per-element validation loop while still avoiding aliasing the input.

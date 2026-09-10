@@ -370,6 +370,31 @@ describe("bloom filter", () => {
 		assert.equal(intersection.buckets[0], 0b00);
 	});
 
+	it("recomputes the reduction bias after direct .m mutation", () => {
+		// The biased-division reduction caches a per-m bias; mutating .m to
+		// another tight (non-power-of-2) size must produce positions
+		// identical to a filter constructed at that size.
+		const keys = ["alpha", "beta", "gamma", "delta", "0", "12345", "-7", ""];
+		for (const m of [320, 640, 992]) {
+			const fresh = new BloomFilter(m, 4);
+			const mutated = new BloomFilter(320, 4);
+			mutated.m = m;
+			for (const key of keys) {
+				assert.deepEqual(
+					Array.from(mutated.locations(key)),
+					Array.from(fresh.locations(key)),
+					`m=${m} key=${key}`,
+				);
+			}
+		}
+		// m = 1 edge: every position must be 0.
+		const one = new BloomFilter(320, 4);
+		one.m = 1;
+		for (const key of keys) {
+			assert.deepEqual(Array.from(one.locations(key)), [0, 0, 0, 0]);
+		}
+	});
+
 	it("size", () => {
 		const f = new BloomFilter(1024 * 1024, 4);
 		for (let i = 0; i < 100; ++i) f.add(i);
