@@ -449,6 +449,21 @@ export class BloomFilter {
 	 */
 	toBytes(): Uint8Array {
 		const buckets = this.buckets;
+		// The binary header stores m and k in 32 bits each; DataView would
+		// silently wrap larger values mod 2^32, so reject them explicitly.
+		// Note m = 2^32 is constructible via the public constructor.
+		if (this.m > 0xffffffff) {
+			throw new RangeError(
+				`BloomFilter.toBytes() cannot serialize a filter with m=${this.m}: ` +
+					"the binary header stores m in 32 bits. Use toJSON() for this filter size.",
+			);
+		}
+		if (!Number.isInteger(this.k) || this.k > 0xffffffff) {
+			throw new RangeError(
+				`BloomFilter.toBytes() cannot serialize a filter with k=${this.k}: ` +
+					"the binary header stores k in 32 bits.",
+			);
+		}
 		const bucketByteCount = buckets.length * 4;
 		const buf = new ArrayBuffer(BLOOM_BINARY_HEADER_LENGTH + bucketByteCount);
 		const header = new Uint8Array(buf, 0, 8);

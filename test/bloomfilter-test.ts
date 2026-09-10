@@ -111,6 +111,22 @@ describe("bloom filter", () => {
 		assert.equal(restored.test("gamma"), false);
 	});
 
+	it("toBytes rejects filters too large for the 32-bit header", () => {
+		// m = 2^32 is constructible via the public constructor but does not
+		// fit the binary header's 32-bit m field. Use a fake receiver to avoid
+		// allocating a 512MB backing array, as in the bucket-index tests.
+		const fake = {
+			m: 0x100000000,
+			k: 1,
+			buckets: new Uint32Array([0]),
+			_hashId: 1,
+		};
+		assert.throws(
+			() => BloomFilter.prototype.toBytes.call(fake),
+			/cannot serialize a filter with m=4294967296/,
+		);
+	});
+
 	it("binary serialisation preserves _useMask through round-trip", () => {
 		const tight = BloomFilter.withTargetError(60_000, 1e-3);
 		const pow2 = BloomFilter.withTargetError(60_000, 1e-3, { storage: "pow2" });
