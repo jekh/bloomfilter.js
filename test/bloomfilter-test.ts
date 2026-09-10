@@ -412,6 +412,12 @@ describe("bloom filter", () => {
 		assert.equal(a._useMask, b._useMask);
 	});
 
+	it("storage:pow2 rounds sub-word and boundary sizes up", () => {
+		assert.equal(new BloomFilter(33, 1, { storage: "pow2" }).m, 64);
+		assert.equal(new BloomFilter(64, 1, { storage: "pow2" }).m, 64);
+		assert.equal(new BloomFilter(1025, 1, { storage: "pow2" }).m, 2048);
+	});
+
 	it("withTargetError with storage:pow2 rounds m up to a power of 2", () => {
 		const f = BloomFilter.withTargetError(100, 1e-5, { storage: "pow2" });
 		assert.equal(f.m, 4096);

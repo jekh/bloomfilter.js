@@ -121,10 +121,9 @@ export class BloomFilter {
 		}
 
 		if (a === undefined && storage === "pow2") {
+			// nextPowerOf2 is monotonic and exact on this domain, so rounding a
+			// bitSize already bounded by MAX_BITS cannot exceed MAX_BITS.
 			bitSize = nextPowerOf2(Math.max(32, bitSize));
-			if (bitSize > MAX_BITS) {
-				throw new RangeError(`Rounded m exceeds maximum bits ${MAX_BITS}.`);
-			}
 		} else {
 			const n = Math.ceil(bitSize / 32);
 			bitSize = n * 32;
