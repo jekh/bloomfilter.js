@@ -407,6 +407,165 @@ export class BloomFilter {
 		return true;
 	}
 
+	/**
+	 * Add every key in `keys`. Identical to calling add() per key, but
+	 * hoists per-filter setup out of the per-key loop. Not atomic: if a key
+	 * throws (e.g. a Symbol, as with add()), earlier keys stay added.
+	 */
+	addAll(keys: ArrayLike<unknown>): void {
+		const k = this.k;
+		const m = this.m;
+		const buckets = this.buckets;
+		const useMask = this._useMask;
+		const n = keys.length;
+		const seed = { a: 0, b: 0 };
+		if (useMask) {
+			const mask = m - 1;
+			for (let j = 0; j < n; ++j) {
+				// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
+				const s = keys[j] + "";
+				BloomFilter._hashPair(s, m, true, seed);
+				let a = seed.a;
+				let b = seed.b;
+				buckets[a >>> 5] |= 1 << (a & 0x1f);
+				for (let i = 1; i < k; ++i) {
+					a = (a + b) & mask;
+					b = (b + i) & mask;
+					buckets[a >>> 5] |= 1 << (a & 0x1f);
+				}
+			}
+		} else {
+			for (let j = 0; j < n; ++j) {
+				// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
+				const s = keys[j] + "";
+				BloomFilter._hashPair(s, m, false, seed);
+				let a = seed.a;
+				let b = seed.b;
+				buckets[a >>> 5] |= 1 << (a & 0x1f);
+				for (let i = 1; i < k; ++i) {
+					a = a + b;
+					if (a >= m) a -= m;
+					b = b + i;
+					if (b >= m) b %= m;
+					buckets[a >>> 5] |= 1 << (a & 0x1f);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Test every key in `keys`, returning one boolean per key in order.
+	 * Identical to calling test() per key, with per-filter setup hoisted.
+	 */
+	testAll(keys: ArrayLike<unknown>): boolean[] {
+		const k = this.k;
+		const m = this.m;
+		const buckets = this.buckets;
+		const useMask = this._useMask;
+		const n = keys.length;
+		const out = new Array<boolean>(n);
+		const seed = { a: 0, b: 0 };
+		if (useMask) {
+			const mask = m - 1;
+			for (let j = 0; j < n; ++j) {
+				// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
+				const s = keys[j] + "";
+				BloomFilter._hashPair(s, m, true, seed);
+				let a = seed.a;
+				let b = seed.b;
+				let hit = (buckets[a >>> 5] & (1 << (a & 0x1f))) !== 0;
+				for (let i = 1; hit && i < k; ++i) {
+					a = (a + b) & mask;
+					b = (b + i) & mask;
+					hit = (buckets[a >>> 5] & (1 << (a & 0x1f))) !== 0;
+				}
+				out[j] = hit;
+			}
+		} else {
+			for (let j = 0; j < n; ++j) {
+				// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
+				const s = keys[j] + "";
+				BloomFilter._hashPair(s, m, false, seed);
+				let a = seed.a;
+				let b = seed.b;
+				let hit = (buckets[a >>> 5] & (1 << (a & 0x1f))) !== 0;
+				for (let i = 1; hit && i < k; ++i) {
+					a = a + b;
+					if (a >= m) a -= m;
+					b = b + i;
+					if (b >= m) b %= m;
+					hit = (buckets[a >>> 5] & (1 << (a & 0x1f))) !== 0;
+				}
+				out[j] = hit;
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * FNV-1a 64-bit hash split into the two reduced 32-bit halves that drive
+	 * the enhanced-double-hashing recurrence. Writes into `out` so batch
+	 * callers pay no per-key allocation; shared by addAll()/testAll() so the
+	 * hash block exists in exactly one place there. Bit-identical to the
+	 * inline sequences in add(), test(), and locations().
+	 */
+	private static _hashPair(
+		s: string,
+		m: number,
+		useMask: boolean,
+		out: { a: number; b: number },
+	): void {
+		let a: number;
+		let b: number;
+
+		// FNV-1a hash (64-bit).
+		{
+			const fnv64PrimeX = 0x01b3;
+			const l = s.length;
+			let t0 = 0,
+				t1 = 0,
+				t2 = 0,
+				t3 = 0;
+			let v0 = 0x2325,
+				v1 = 0x8422,
+				v2 = 0x9ce4,
+				v3 = 0xcbf2;
+
+			for (let i = 0; i < l; ++i) {
+				v0 ^= s.charCodeAt(i);
+				t0 = v0 * fnv64PrimeX;
+				t1 = v1 * fnv64PrimeX;
+				t2 = v2 * fnv64PrimeX;
+				t3 = v3 * fnv64PrimeX;
+				t2 += v0 << 8;
+				t3 += v1 << 8;
+				t1 += t0 >>> 16;
+				v0 = t0 & 0xffff;
+				t2 += t1 >>> 16;
+				v1 = t1 & 0xffff;
+				v3 = (t3 + (t2 >>> 16)) & 0xffff;
+				v2 = t2 & 0xffff;
+			}
+
+			a = (v3 << 16) | v2;
+			b = (v1 << 16) | v0;
+		}
+
+		if (useMask) {
+			const mask = m - 1;
+			a &= mask;
+			b &= mask;
+		} else {
+			a = a % m;
+			if (a < 0) a += m;
+			b = b % m;
+			if (b < 0) b += m;
+		}
+
+		out.a = a;
+		out.b = b;
+	}
+
 	// Estimated cardinality.
 	size(): number {
 		return (-this.m * Math.log(1 - this.countBits() / this.m)) / this.k;

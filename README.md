@@ -59,6 +59,10 @@ const autoBloom = BloomFilter.withTargetError(1_000_000, 1e-6);
 // Use power-of-two storage for faster bitmask-based reduction.
 // Note: this trades speed for increased storage.
 const fastBloom = BloomFilter.withTargetError(1_000_000, 1e-6, { storage: "pow2" });
+
+// Bulk ingest and queries. Identical to per-key add()/test() calls.
+bloom.addAll(["foo", "bar", "baz"]);
+const [foo, missing]: boolean[] = bloom.testAll(["foo", "missing"]);
 ```
 
 Performance improvements
@@ -141,6 +145,8 @@ New features
 - Binary and Base64 serialisation via `toBytes()`, `toArrayBuffer()`,
   `toBase64()`, `fromBytes()`, `fromArrayBuffer()`, and `fromBase64()`.
 - `isSaturated()` helper to detect when every bit in the filter is set.
+- Bulk `addAll()` / `testAll()` for ingesting and querying many keys with
+  per-filter setup hoisted out of the per-key loop.
 
 Implementation
 --------------

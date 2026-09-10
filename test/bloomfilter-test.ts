@@ -57,6 +57,42 @@ describe("bloom filter", () => {
 		assert.equal(f.test(2), false);
 	});
 
+	it("addAll matches per-key add", () => {
+		const keys = ["alpha", "beta", "", 1, 2, "x".repeat(100)];
+		for (const [m, k, options] of [
+			[1000, 4, undefined],
+			[1024, 4, undefined],
+			[4096, 16, { storage: "pow2" }],
+			[64, 32, undefined],
+		] as const) {
+			const a = new BloomFilter(m, k, options);
+			const b = new BloomFilter(m, k, options);
+			for (const key of keys) a.add(key);
+			b.addAll(keys);
+			assert.deepEqual(Array.from(b.buckets), Array.from(a.buckets));
+		}
+		assert.deepEqual(new BloomFilter(64, 4).addAll([]), undefined);
+	});
+
+	it("testAll matches per-key test", () => {
+		const f = new BloomFilter(1000, 4);
+		f.addAll(["a", "b", 42]);
+		assert.deepEqual(f.testAll(["a", "b", 42, "c", 43]), [
+			true,
+			true,
+			true,
+			false,
+			false,
+		]);
+		assert.deepEqual(f.testAll([]), []);
+	});
+
+	it("addAll/testAll reject Symbols like add/test", () => {
+		const f = new BloomFilter(1000, 4);
+		assert.throws(() => f.addAll([Symbol("x")]), TypeError);
+		assert.throws(() => f.testAll([Symbol("x")]), TypeError);
+	});
+
 	it("serialises and deserialises with JSON", () => {
 		const f = new BloomFilter(1000, 4);
 		f.add("Bess");
