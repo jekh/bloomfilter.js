@@ -489,6 +489,20 @@ describe("bloom filter", () => {
 		assert.ok(intersection.buckets instanceof Uint32Array);
 	});
 
+	it("rejects sparse array-like bucket input before allocating", () => {
+		// { length } with no elements must fail validation on its first hole
+		// instead of triggering a large transient backing allocation.
+		const sparse = { length: 134217728 };
+		assert.throws(
+			() => new BloomFilter(sparse as unknown as number[], 1),
+			/Bucket values must be unsigned 32-bit integers/,
+		);
+		assert.throws(
+			() => BloomFilter.fromJSON({ version: 1, k: 1, buckets: sparse }),
+			/Bucket values must be unsigned 32-bit integers/,
+		);
+	});
+
 	it("constructor copies Uint32Array input rather than aliasing", () => {
 		const source = new Uint32Array([0xdeadbeef, 0xcafebabe, 0, 0xffffffff]);
 		const f = new BloomFilter(source, 1);

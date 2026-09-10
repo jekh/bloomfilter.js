@@ -140,16 +140,22 @@ export class BloomFilter {
 			// Uint32Array already guarantees uint32 bucket values; the native
 			// typed-array copy avoids validation overhead without aliasing input.
 			buckets = new Uint32Array(a);
+		} else if (a) {
+			// Validate before allocating: a sparse array-like such as
+			// { length: 134217728 } must throw on its first hole instead of
+			// triggering a large transient backing allocation.
+			const inputLen = Math.min(a.length, n);
+			for (let i = 0; i < inputLen; ++i) {
+				assertBucketValue(a[i]);
+			}
+			buckets = new Uint32Array(n);
+			for (let i = 0; i < inputLen; ++i) {
+				const value = a[i];
+				assertBucketValue(value);
+				buckets[i] = value;
+			}
 		} else {
 			buckets = new Uint32Array(n);
-			if (a) {
-				const inputLen = Math.min(a.length, n);
-				for (let i = 0; i < inputLen; ++i) {
-					const value = a[i];
-					assertBucketValue(value);
-					buckets[i] = value;
-				}
-			}
 		}
 
 		this.buckets = buckets;
