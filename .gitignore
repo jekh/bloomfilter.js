@@ -15,7 +15,13 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Bench run output (summaries are opt-in via --json; never commit raw series)
+/results/
+
 # OS/editor files
 .DS_Store
 .idea/
 .vscode/
+
+# Local agent working state (plans, scratch)
+.agents/

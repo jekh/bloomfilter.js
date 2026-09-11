@@ -42,11 +42,14 @@
 		"lint": "biome check --error-on-warnings",
 		"lint:fix": "biome check --write",
 		"prepack": "npm run build",
-		"test": "npm run build && tsc -p tsconfig.test.json && node --test .test/test/bloomfilter-test.js"
+		"test": "npm run build && tsc -p tsconfig.test.json && node --test .test/test/bloomfilter-test.js .test/test/bench-baseline-test.js",
+		"bench": "pnpm build && node bench/compare.mjs",
+		"bench:full": "pnpm build && node bench/compare.mjs --full"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.12",
 		"@types/node": "^22.20.2",
+		"bloomfilter-upstream": "npm:bloomfilter@1.1.0",
 		"typescript": "^7.0.2"
 	},
 	"engines": {
