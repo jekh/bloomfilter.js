@@ -29,7 +29,7 @@ const val = (f) => {
 };
 if (has("--help")) {
 	console.log(`usage: node bench/compare.mjs [--full] [--xlarge]
-       [--upstream <ref|path>] [--json <path>]
+       [--upstream <ref|path>] [--fork <ref|path>] [--json <path>]
        [--report-only <path>] [--gate <pct>] [--rounds <n>]`);
 	process.exit(0);
 }
@@ -37,6 +37,7 @@ const OPTS = {
 	full: has("--full"),
 	xlarge: has("--xlarge"),
 	upstream: val("--upstream"),
+	fork: val("--fork"),
 	json: val("--json"),
 	reportOnly: val("--report-only"),
 	gate: Number(val("--gate") ?? "6"),
@@ -68,21 +69,10 @@ async function loadSide(upstreamSpec, forkBuilt) {
 	let pin;
 	let base = null;
 	if (upstreamSpec) {
-		let isFile = false;
-		try {
-			readFileSync(resolve(upstreamSpec));
-			isFile = true;
-		} catch {
-			// Not a readable file; fall through to git-ref resolution.
-		}
-		if (isFile) {
-			upstreamUrl = pathToFileURL(resolve(upstreamSpec)).href;
-			pin = "n/a (path override)";
-		} else {
-			base = materializeBaseline(upstreamSpec);
-			upstreamUrl = pathToFileURL(base.file).href;
-			pin = `baseline@${base.sha}`;
-		}
+		const side = resolveSideFile(upstreamSpec);
+		base = side.base;
+		upstreamUrl = pathToFileURL(side.file).href;
+		pin = side.base ? `baseline@${side.base.sha}` : "n/a (path override)";
 	} else {
 		try {
 			upstreamUrl = import.meta.resolve("bloomfilter-upstream");
@@ -122,11 +112,11 @@ function hasMethod(cls, name) {
 // the single-file lib into a temp dir, then compile .ts with this repo's
 // own toolchain (a bare .js ref is used as-is). The temp dir is removed
 // by the process-exit cleanup below on every exit path.
-let baselineDir = null;
+const baselineDirs = [];
 process.on("exit", () => {
-	if (baselineDir !== null) {
+	for (const dir of baselineDirs) {
 		try {
-			rmSync(baselineDir, { recursive: true, force: true });
+			rmSync(dir, { recursive: true, force: true });
 		} catch {
 			// best-effort temp cleanup at process exit
 		}
@@ -151,7 +141,7 @@ export function materializeBaseline(ref) {
 		);
 	}
 	const dir = mkdtempSync(join(tmpdir(), "bloom-baseline-"));
-	baselineDir = dir;
+	baselineDirs.push(dir);
 	writeFileSync(
 		join(dir, kind),
 		execFileSync("git", ["show", `${sha}:${kind}`], { cwd: ROOT }),
@@ -199,6 +189,20 @@ export function materializeBaseline(ref) {
 		throw new Error(`--upstream: build produced no module at '${ref}'`);
 	}
 	return { dir, file, sha, short: sha.slice(0, 12) };
+}
+
+// Resolve either arm to a runnable file: an existing path is used
+// as-is, otherwise the spec is treated as a git ref (materialized
+// above; temp dirs are tracked for exit cleanup).
+export function resolveSideFile(spec) {
+	try {
+		readFileSync(resolve(spec));
+		return { file: resolve(spec), base: null };
+	} catch {
+		// Not a readable file; fall through to git-ref resolution.
+	}
+	const base = materializeBaseline(spec);
+	return { file: base.file, base };
 }
 
 // Item-count rounds pin explicit (m,k) at constant load (~19.2
@@ -659,8 +663,9 @@ function timeRounds(Fork, Up, rows, foe) {
 
 function printTable(report) {
 	const foe = report.foe ?? "upstream";
+	const friend = report.friend ?? "fork";
 	console.log(
-		`fork-vs-${foe} bench | node ${report.runtime.node} ${report.runtime.platform}/${report.runtime.arch} | pin ${report.pin ?? "n/a"} fork ${report.forkRef ?? "n/a"}${report.forkDirty ? " (dirty)" : ""} | ${report.timestamp}`,
+		`${friend}-vs-${foe} bench | node ${report.runtime.node} ${report.runtime.platform}/${report.runtime.arch} | pin ${report.pin ?? "n/a"} fork ${report.forkRef ?? "n/a"}${report.forkDirty ? " (dirty)" : ""} | ${report.timestamp}`,
 	);
 	for (const r of report.rows) {
 		if (r.deltaPct === null) {
@@ -678,7 +683,7 @@ function printTable(report) {
 			continue;
 		}
 		console.log(
-			`${r.config} ${r.phase} x${r.n}: fork ${r.forkMs.toFixed(2)}ms vs ${foe} ${r.upMs.toFixed(2)}ms (${d >= 0 ? "+" : ""}${d.toFixed(1)}%)`,
+			`${r.config} ${r.phase} x${r.n}: ${friend} ${r.forkMs.toFixed(2)}ms vs ${foe} ${r.upMs.toFixed(2)}ms (${d >= 0 ? "+" : ""}${d.toFixed(1)}%)`,
 		);
 	}
 	const c = report.gate;
@@ -723,11 +728,13 @@ async function main() {
 			`built fork not found at ${FORK_BUILT}; run pnpm build first`,
 		);
 	}
+	const forkSide = OPTS.fork ? resolveSideFile(OPTS.fork) : null;
 	const { Fork, Up, pin, nullMode, base } = await loadSide(
 		OPTS.upstream,
-		FORK_BUILT,
+		forkSide?.file ?? FORK_BUILT,
 	);
 	const foe = base ? `base@${base.short}` : "upstream";
+	const friend = forkSide?.base ? `fork@${forkSide.base.short}` : "fork";
 	equivalence(Fork, Up);
 	const rows = [];
 	timeRounds(Fork, Up, rows, foe);
@@ -745,8 +752,18 @@ async function main() {
 		pin,
 		baseline: base ? { ref: OPTS.upstream, sha: base.sha } : null,
 		foe,
-		forkRef: sh("git", ["rev-parse", "--short", "HEAD"]),
-		forkDirty: dirtyOut === null ? null : dirtyOut !== "",
+		friend,
+		forkRef: forkSide?.base
+			? forkSide.base.short
+			: sh("git", ["rev-parse", "--short", "HEAD"]),
+		forkDirty: forkSide?.base
+			? null
+			: dirtyOut === null
+				? null
+				: dirtyOut !== "",
+		forkBaseline: forkSide?.base
+			? { ref: OPTS.fork, sha: forkSide.base.sha }
+			: null,
 		nullMode,
 		options: {
 			full: OPTS.full,

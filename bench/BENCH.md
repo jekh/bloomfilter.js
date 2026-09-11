@@ -50,6 +50,14 @@ Provenance lands in the report: `pin` reads `baseline@<sha>`,
 gate or a dirty fork invalidates citation. Example — isolate R1:
 `node bench/compare.mjs --upstream 00a74d8^`.
 
+`--fork <ref|path>` selects the fork arm symmetrically (default: the
+working-tree build), so any commit runs against any other: `--fork C
+--upstream C^` isolates commit C's own delta. Stepwise recipe for a
+range: run each functional commit against its parent in oldest-first
+order with the same harness and machine state. Steps whose paths the
+matrix doesn't time comparatively (validation-only, deser-only, or
+untimed APIs) should read ~0 — that is a pass, not a failure.
+
 ## Method
 
 1. **Equivalence prelude.** Identical key streams (plus edge keys)
@@ -104,6 +112,14 @@ equivalence.
   version, platform, arch, upstream pin, and fork ref; cross-machine
   comparison is not supported.
 - Treat anything inside the printed noise floor as zero.
+- Cross-file micro-row deltas carry an additional layout systematic:
+  identical logic compiled from different files lands at different
+  code addresses, and page-offset address bits survive ASLR, so L1I
+  placement (and a few percent on tiny mask ops) is stable per
+  machine, per V8, per file pair — across reruns and arm swaps. The
+  A/A gate cannot see it (same file both arms). Quote micro-row
+  effects only when replicated and well above single digits, or with
+  a same-logic control (e.g. a no-op conversion step) bounding it.
 - A tripped gate invalidates the run; re-run when the machine is idle.
 
 ## Null test
