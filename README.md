@@ -150,6 +150,31 @@ Performance improvements
     while still honouring the error contract, the new logic can drop `k` by
     one in many common configurations without sacrificing correctness.
 
+- **Batch `addAll()` / `testAll()` APIs** — Bulk ingest and queries hoist
+  per-filter setup out of the per-key loop and preallocate the result
+  array, instead of repeating the full `add()` / `test()` preamble per key.
+  - Measured 7–22% faster batched queries (`testAll`) and up to ~12%
+    faster mask-mode bulk ingest versus per-key loops; tight-mode `addAll`
+    is ~unchanged, where per-round bucket work dominates. Both share one
+    private hash helper with the inline paths so the positions cannot drift.
+- **64 KiB popcount table in `countBits()`** — Bit counting uses two table
+  lookups per word instead of the parallel-bitcount ALU chain.
+  - Measured 17–19% faster on sparse and dense filters. The table is built
+    once at module load from the same `popcnt()` it replaces, so the two
+    cannot drift apart; import time is unchanged.
+- **Early-exit `isSaturated()`** — Saturation is detected by scanning words
+  for the first non-`0xffffffff` entry instead of running a full population
+  count, which is exact because `m` is always a multiple of 32.
+  - Constant-time for any non-saturated filter and ~2x cheaper per word
+    even fully saturated (measured −100% on fresh/half-full and −90% on
+    saturated 1 Mbit filters).
+- **Validate buckets once instead of twice on copy** — Deserialisation
+  keeps the pre-allocation validation pass (the security property against
+  sparse hostile inputs) but no longer re-validates during the copy, with
+  the constructor documenting that inputs must be stable across reads.
+  - Measured 11–13% faster `fromJSON`. No behaviour change for stable
+    inputs, which `JSON.parse` output always is.
+
 New features
 ------------
 
@@ -158,6 +183,37 @@ New features
 - `isSaturated()` helper to detect when every bit in the filter is set.
 - Bulk `addAll()` / `testAll()` for ingesting and querying many keys with
   per-filter setup hoisted out of the per-key loop.
+
+Safety improvements
+-------------------
+
+- **Validate buckets before allocating** — The constructor used to size
+  the `Uint32Array` backing store from unvalidated array-like length, so
+  a 50-byte sparse payload like `{length: 134217728}` triggered a 512 MB
+  transient allocation before validation threw. Elements are now validated
+  first, then the backing store is allocated and copied.
+  - Deserialisation-path cost only; `add()` / `test()` are untouched, and
+    the follow-up single-validation pass keeps this property while copying
+    without re-validating stable inputs.
+- **Lazily-allocated `locations()` scratch** — Construction, `union()` /
+  `intersection()`, and deserialisation no longer allocate `k` scratch
+  positions up front; the buffer is built on the first `locations()` call
+  and rebuilt only when `k` changes or the cached width no longer fits `m`.
+  - This closes the small-input/big-allocation asymmetry where an untrusted
+    payload with a huge `k` (e.g. `fromJSON({k: 1e7, ...})`) forced a
+    proportional scratch allocation at deserialise time.
+- **Prototype-safe hash allowlist in `fromJSON()`** — The `data.hash`
+  check used the `in` operator, which also matches inherited
+  `Object.prototype` properties, so payloads declaring hash `"toString"`
+  or `"constructor"` were accepted. It now uses `Object.hasOwn()`.
+  - No behavioural effect today — the name is validated but never
+    dispatched on — but this would become a real bug if a second hash
+    variant is ever added.
+- **Explicit 32-bit guard in `toBytes()`** — The binary header stores `m`
+  and `k` in 32 bits each, and `DataView` silently wraps larger values mod
+  2^32. Since `m` = 2^32 is constructible, `toBytes()` could emit a corrupt
+  header (read back as `m` = 0) that `fromBytes()` only rejects at read
+  time. It now throws a `RangeError` at write time and points at `toJSON()`.
 
 Implementation
 --------------
