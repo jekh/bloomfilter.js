@@ -216,6 +216,12 @@ export class BloomFilter {
 		const k = this.k;
 		const m = this.m;
 		const r = this._locations;
+		let mBias = this._mBias;
+		if (this._mBiasFor !== m) {
+			// Recomputes after direct .m mutation (predicts not-taken).
+			mBias = this._mBias = mBiasFor(m);
+			this._mBiasFor = m;
+		}
 		let a: number;
 		let b: number;
 
@@ -263,13 +269,6 @@ export class BloomFilter {
 				r[i] = a;
 			}
 		} else {
-			// Mask path skips this: mBias is only used below.
-			let mBias = this._mBias;
-			if (this._mBiasFor !== m) {
-				// Recomputes after direct .m mutation (predicts not-taken).
-				mBias = this._mBias = mBiasFor(m);
-				this._mBiasFor = m;
-			}
 			// R1: biased-division reduction, bit-identical to the signed
 			// `%` reduction without the fmod libcall (see mBiasFor). The
 			// fixups are ~never taken: t >= 0, so the rounded quotient
@@ -298,6 +297,12 @@ export class BloomFilter {
 		const k = this.k;
 		const m = this.m;
 		const buckets = this.buckets;
+		let mBias = this._mBias;
+		if (this._mBiasFor !== m) {
+			// Recomputes after direct .m mutation (predicts not-taken).
+			mBias = this._mBias = mBiasFor(m);
+			this._mBiasFor = m;
+		}
 		// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
 		const s = v + "";
 		let a: number;
@@ -347,13 +352,6 @@ export class BloomFilter {
 				buckets[a >>> 5] |= 1 << (a & 0x1f);
 			}
 		} else {
-			// Mask path skips this: mBias is only used below.
-			let mBias = this._mBias;
-			if (this._mBiasFor !== m) {
-				// Recomputes after direct .m mutation (predicts not-taken).
-				mBias = this._mBias = mBiasFor(m);
-				this._mBiasFor = m;
-			}
 			// R1: biased-division reduction, bit-identical to the signed
 			// `%` reduction without the fmod libcall (see mBiasFor). The
 			// fixups are ~never taken: t >= 0, so the rounded quotient
@@ -380,6 +378,12 @@ export class BloomFilter {
 		const k = this.k;
 		const m = this.m;
 		const buckets = this.buckets;
+		let mBias = this._mBias;
+		if (this._mBiasFor !== m) {
+			// Recomputes after direct .m mutation (predicts not-taken).
+			mBias = this._mBias = mBiasFor(m);
+			this._mBiasFor = m;
+		}
 		// biome-ignore lint/style/useTemplate: Preserve legacy string coercion, which rejects Symbols.
 		const s = v + "";
 		let a: number;
@@ -429,13 +433,6 @@ export class BloomFilter {
 				if ((buckets[a >>> 5] & (1 << (a & 0x1f))) === 0) return false;
 			}
 		} else {
-			// Mask path skips this: mBias is only used below.
-			let mBias = this._mBias;
-			if (this._mBiasFor !== m) {
-				// Recomputes after direct .m mutation (predicts not-taken).
-				mBias = this._mBias = mBiasFor(m);
-				this._mBiasFor = m;
-			}
 			// R1: biased-division reduction, bit-identical to the signed
 			// `%` reduction without the fmod libcall (see mBiasFor). The
 			// fixups are ~never taken: t >= 0, so the rounded quotient
