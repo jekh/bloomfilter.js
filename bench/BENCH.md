@@ -12,10 +12,11 @@ git remote, no network at bench time.
 
 ## Commands
 
-- `pnpm bench` — quick matrix (~10s): item-count small round in
-  full shape, medium primaries, micro-op configs.
-- `pnpm bench:full` — adds the 1M round and full shapes everywhere
-  (~15-30s total).
+- `pnpm bench` — quick matrix (~10s): item-count small and
+  medium-50k rounds in full shape, medium-100k primaries, micro-op
+  configs.
+- `pnpm bench:full` — adds the 500k and 1M rounds and full shapes
+  everywhere (~15-30s total).
 - `node bench/compare.mjs --xlarge` — opts into the 10M round
   (~1 min, single timed pass, noisy by declaration).
 - `node bench/compare.mjs --upstream <git-ref|path>` — compare
@@ -76,12 +77,16 @@ gate or a dirty fork invalidates citation. Example — isolate R1:
 Item-count rounds hold constant load (~19 bits/item at p=1e-4) with
 explicit `(m,k)` — never `withTargetError`, which the fork tightened
 (a93a245), so the two sides would size differently. Constant load
-makes the ladder span cache regimes (~24KB, ~240KB, ~2.4MB, ~24MB
-buckets): small-10k (191712, 13), medium-100k (1917024, 13),
-large-1M (19170144, 13), xlarge-10M (191701152, 13). Each round times
+makes the ladder span cache regimes (~24KB, ~120KB, ~240KB,
+~1.2MB, ~2.4MB, ~24MB buckets): small-10k (191712, 13),
+medium-50k (958528, 13), medium-100k (1917024, 13),
+large-500k (9585088, 13), large-1M (19170144, 13),
+xlarge-10M (191701152, 13). Each round times
 add plus test-hit plus test-miss with capped query counts, so
 read-heavy (query serving) and write-heavy (ingest) mixes read off
-directly.
+directly. Two density-bracket rows at the small geometry
+(test-miss-empty on a fresh filter, test-miss-full on a saturated
+one) bracket miss cost, which is density-dependent via early exit.
 
 Micro-op configs at tiny explicit m use deliberately overloaded
 filters — they measure rates, not realism: tight k1/k4/k16

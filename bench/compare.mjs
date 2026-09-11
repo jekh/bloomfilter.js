@@ -208,12 +208,29 @@ export function materializeBaseline(ref) {
 const ROUNDS = [
 	{ tag: "small-10k", n: 10000, m: 191712, k: 13, queries: 10000, reps: 7 },
 	{
+		tag: "medium-50k",
+		n: 50000,
+		m: 958528,
+		k: 13,
+		queries: 50000,
+		reps: 5,
+	},
+	{
 		tag: "medium-100k",
 		n: 100000,
 		m: 1917024,
 		k: 13,
 		queries: 100000,
 		reps: 5,
+	},
+	{
+		tag: "large-500k",
+		n: 500000,
+		m: 9585088,
+		k: 13,
+		queries: 100000,
+		reps: 3,
+		fullOnly: true,
 	},
 	{
 		tag: "large-1M",
@@ -383,6 +400,39 @@ function pushRow(rows, config, phase, n, forkMs, upMs, note) {
 	rows.push(row);
 }
 
+// Density brackets at one geometry: miss cost is density-dependent
+// (early exit), so time both extremes — an empty filter (floor: exits
+// at the first probe) and a saturated one (ceiling: every miss walks
+// all k bits). Same keys and reps as that round's test-miss so the
+// three read off together.
+function timeDensityBrackets(Fork, Up, rows, cfg) {
+	const q = cfg.queries;
+	const qr = OPTS.rounds ?? 5;
+	let fold = 0;
+	for (const [phase, full] of [
+		["test-miss-empty", false],
+		["test-miss-full", true],
+	]) {
+		const f = new Fork(cfg.m, cfg.k);
+		const u = new Up(cfg.m, cfg.k);
+		if (full) {
+			f.buckets.fill(0xffffffff);
+			u.buckets.fill(0xffffffff);
+		}
+		const [a, b] = race(
+			() => {
+				for (let i = 0; i < q; ++i) fold += f.test(`missing-zz-${i}`) ? 1 : 0;
+			},
+			() => {
+				for (let i = 0; i < q; ++i) fold += u.test(`missing-zz-${i}`) ? 1 : 0;
+			},
+			qr,
+		);
+		pushRow(rows, cfg.tag, phase, q, a, b);
+	}
+	if (fold === -1) console.log("unreachable");
+}
+
 function timeRounds(Fork, Up, rows, foe) {
 	const repsOf = (def) => OPTS.rounds ?? def;
 	// A/A calibration: same side on both arms. Must read ~0 in any
@@ -542,6 +592,7 @@ function timeRounds(Fork, Up, rows, foe) {
 		pushRow(rows, r.tag, "test-miss", q, a, b);
 		if (fold === -1) console.log("unreachable");
 	}
+	timeDensityBrackets(Fork, Up, rows, ROUNDS[0]);
 	// countBits on small plus the largest running round (linear demo).
 	const countCfgs = [{ tag: "count-small", m: ROUNDS[0].m, k: ROUNDS[0].k }];
 	const big = [...ROUNDS]
